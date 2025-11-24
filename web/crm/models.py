@@ -47,6 +47,9 @@ class Contact(models.Model):
     def __str__(self):
         return self.name
 
+    def has_delete_permission(self, request, obj=None):
+        return False  # нельзя удалить нигде в админке
+
 
 class Product(models.Model):
     name = models.CharField("Назва продукту", max_length=255)
@@ -77,6 +80,10 @@ class Product(models.Model):
         if self.sku:
             return f"{self.name} ({self.sku})"
         return self.name
+
+    def has_delete_permission(self, request, obj=None):
+        return False  # нельзя удалить нигде в админке
+
 
 
 class OrderItem(models.Model):
@@ -204,7 +211,8 @@ class Order(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.created_at} - {self.contact.name} - {self.calculate_items_total()} ({self.get_status_display()})"
+        date_str = self.created_at.strftime("%d.%m.%Y %H:%M")
+        return f"{date_str} – {self.contact.name} – {self.calculate_items_total()} ({self.get_status_display()})"
 
     def calculate_items_total(self):
         from django.db.models import F, Sum
@@ -212,6 +220,10 @@ class Order(models.Model):
             total=Sum(F("unit_price") * F("quantity"))
         )
         return agg["total"] or 0
+
+    def has_delete_permission(self, request, obj=None):
+        return False  # нельзя удалить нигде в админке
+
 
 
 

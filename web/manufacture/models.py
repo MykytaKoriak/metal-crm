@@ -42,6 +42,10 @@ class Machine(models.Model):
     def __str__(self):
         return f"{self.name} ({self.get_type_display()})"
 
+    def has_delete_permission(self, request, obj=None):
+        return False  # нельзя удалить нигде в админке
+
+
 
 class WorkUnit(models.Model):
     """
@@ -71,6 +75,10 @@ class WorkUnit(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.get_type_display()})"
+
+    def has_delete_permission(self, request, obj=None):
+        return False  # нельзя удалить нигде в админке
+
 
 
 class ProductionSlot(models.Model):
