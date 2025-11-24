@@ -1,0 +1,190 @@
+from django.db import models
+from django.conf import settings  # ← ДОЛЖЕН быть только этот импорт
+from manufacture.models import ProductionSlot
+
+
+class Tag(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+
+    class Meta:
+        verbose_name = "Тег"
+        verbose_name_plural = "Теги"
+
+    def __str__(self):
+        return self.name
+
+
+class Contact(models.Model):
+    class Source(models.TextChoices):
+        INSTAGRAM = 'instagram', 'Instagram'
+        FACEBOOK = 'facebook', 'Facebook'
+        PROM = 'prom', 'Prom.ua'
+        OLX = 'olx', 'OLX'
+        PHONE = 'phone', 'Телефон'
+        RECOMMENDATION = 'recommendation', 'Рекомендація'
+        WORD_OF_MOUTH = 'word_of_mouth', 'Сарафанне радіо'
+        OTHER = 'other', 'Інше'
+
+    name = models.CharField("Ім’я / назва компанії", max_length=255)
+    phone = models.CharField("Телефон", max_length=50, blank=True)
+    email = models.EmailField("Email", blank=True)
+    tags = models.ManyToManyField(Tag, related_name='contacts', blank=True)
+    source = models.CharField(
+        "Джерело контакту",
+        max_length=32,
+        choices=Source.choices,
+        default=Source.OTHER,
+    )
+    comment = models.TextField("Внутрішній коментар", blank=True)
+
+    created_at = models.DateTimeField("Створено", auto_now_add=True)
+    updated_at = models.DateTimeField("Оновлено", auto_now=True)
+
+    class Meta:
+        verbose_name = "Контакт"
+        verbose_name_plural = "Контакти"
+
+    def __str__(self):
+        return self.name
+
+
+class Order(models.Model):
+    class Status(models.TextChoices):
+        NEW = "new", "Новий"
+        IN_PROGRESS = "in_progress", "В роботі"
+        SHIPPED = "shipped", "Відправлений"
+        COMPLETED = "completed", "Завершений"
+        CANCELED = "canceled", "Відмінений"
+
+    class PaymentType(models.TextChoices):
+        COD = "cod", "Післяплата"
+        PREPAY = "prepay", "Передоплата"
+        PARTIAL_PREPAY = "partial_prepay", "Часткова передоплата"
+        CASHLESS = "cashless", "Безготівка"
+        FREE = "free", "Гарантія / безкоштовно"
+
+    class DeliveryMethod(models.TextChoices):
+        NOVA_POSHTA = "nova_poshta", "Нова Пошта"
+        UKRPOSHTA = "ukrposhta", "Укрпошта"
+        COURIER = "courier", "Кур’єр"
+        PICKUP = "pickup", "Самовивіз"
+        OTHER = "other", "Інше"
+
+    title = models.CharField("Назва замовлення", max_length=255)
+    contact = models.ForeignKey(
+        "crm.Contact",
+        related_name="orders",
+        on_delete=models.CASCADE,
+        verbose_name="Клієнт",
+    )
+
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.NEW,
+        db_index=True,
+    )
+
+    deadline = models.DateField("Дедлайн", null=True, blank=True)
+    created_at = models.DateTimeField("Дата створення", auto_now_add=True)
+
+    comment = models.TextField("Додаткові нотатки", blank=True)
+
+    # Додаткові поля
+    shipping_address = models.CharField(
+        "Адреса відправки",
+        max_length=500,
+        blank=True,
+    )
+    tracking_number = models.CharField(
+        "№ ТТН",
+        max_length=100,
+        blank=True,
+    )
+    recipient = models.CharField(
+        "Отримувач",
+        max_length=255,
+        blank=True,
+    )
+
+    payment_amount = models.DecimalField(
+        "Сума оплати",
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+
+    payment_type = models.CharField(
+        "Тип оплати",
+        max_length=20,
+        choices=PaymentType.choices,
+        null=True,
+        blank=True,
+    )
+
+    delivery_method = models.CharField(
+        "Метод доставки",
+        max_length=20,
+        choices=DeliveryMethod.choices,
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = "Замовлення"
+        verbose_name_plural = "Замовлення"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.title} ({self.get_status_display()})"
+
+
+class Task(models.Model):
+    contact = models.ForeignKey(
+        "crm.Contact",
+        related_name="tasks",
+        on_delete=models.CASCADE,
+        verbose_name="Клієнт",
+    )
+
+    title = models.CharField("Назва задачі", max_length=255)
+
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="tasks_assigned_by",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Ким створена",
+    )
+
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="tasks_assigned_to",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Кому призначена",
+    )
+
+    date = models.DateField("Дата задачі", db_index=True)
+
+    status = models.BooleanField(
+        "Виконано",
+        default=False,
+        help_text="Позначає, чи задача виконана",
+    )
+
+    comment = models.TextField("Коментар", blank=True)
+
+    created_at = models.DateTimeField("Створено", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Задача"
+        verbose_name_plural = "Задачі"
+        ordering = ["date", "id"]
+
+    def __str__(self):
+        return f"{self.title} ({'виконано' if self.status else 'не виконано'})"

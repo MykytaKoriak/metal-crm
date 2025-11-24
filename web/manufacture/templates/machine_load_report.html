@@ -1,0 +1,60 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block content %}
+<h1>Завантаженість верстатів</h1>
+
+<style>
+    .status-green {
+        color: #3bb54a;
+        font-weight: bold;
+    }
+
+    .status-yellow {
+        color: #e6a000;
+        font-weight: bold;
+    }
+
+    .status-red {
+        color: #d70000;
+        font-weight: bold;
+    }
+</style>
+
+<table class="table table-striped">
+    <thead>
+    <tr>
+        <th>Верстат</th>
+        <th>Сьогодні</th>
+        <th>3 дні</th>
+        <th>Тиждень</th>
+        <th>Статус</th>
+    </tr>
+    </thead>
+
+    <tbody>
+    {% for row in report %}
+    <tr>
+        <td>
+            <a href="{% url 'machine_detail_report' row.machine.id %}">
+                {{ row.machine.name }}
+            </a>
+        </td>
+        <td>{{ row.today }}%</td>
+        <td>{{ row.three_days }}%</td>
+        <td>{{ row.week }}%</td>
+        <td>
+            {% if row.status == "green" %}
+            <span class="status-green">● Зелений</span>
+            {% elif row.status == "yellow" %}
+            <span class="status-yellow">● Жовтий</span>
+            {% else %}
+            <span class="status-red">● Червоний</span>
+            {% endif %}
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+{% endblock %}
