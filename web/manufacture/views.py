@@ -1,86 +1,106 @@
 from datetime import datetime, time, timedelta
 from django.shortcuts import get_object_or_404, render
 from django.utils.timezone import make_aware, get_current_timezone
-from .models import Machine, ProductionSlot
+from .models import Machine, WorkUnit, ProductionSlot
 
 
 def machine_load_report(request):
-    today = datetime.now().date()
-    now = datetime.now()
+    tz = get_current_timezone()
+    today = datetime.now(tz).date()
 
+    # Періоди
     ranges = {
-        "today": (make_aware(datetime.combine(today, time.min)),
-                  make_aware(datetime.combine(today, time.max))),
-
-        "three_days": (make_aware(datetime.combine(today, time.min)),
-                       make_aware(datetime.combine(today + timedelta(days=3), time.max))),
-
-        "week": (make_aware(datetime.combine(today, time.min)),
-                 make_aware(datetime.combine(today + timedelta(days=7), time.max))),
+        "today": (
+            make_aware(datetime.combine(today, time.min)),
+            make_aware(datetime.combine(today, time.max)),
+        ),
+        "three_days": (
+            make_aware(datetime.combine(today, time.min)),
+            make_aware(datetime.combine(today + timedelta(days=3), time.max)),
+        ),
+        "week": (
+            make_aware(datetime.combine(today, time.min)),
+            make_aware(datetime.combine(today + timedelta(days=7), time.max)),
+        ),
     }
 
-    report = []
+    # Загальна функція розрахунку завантаженості
+    def calc_load(resource, start, end, field_name):
+        """
+        resource — Machine або WorkUnit
+        field_name — 'machine' або 'work_unit'
+        """
+        slots = ProductionSlot.objects.filter(
+            **{field_name: resource},
+            start_datetime__lt=end,
+            end_datetime__gt=start
+        )
 
-    machines = Machine.objects.all()
+        # визначення тривалості робочого дня
+        if hasattr(resource, "workday_start") and resource.workday_start:
+            day_start = resource.workday_start
+            day_end = resource.workday_end
+        else:
+            day_start = time(8, 0)
+            day_end = time(17, 0)
 
-    for machine in machines:
+        workday_hours = (
+            datetime.combine(today, day_end) -
+            datetime.combine(today, day_start)
+        ).seconds / 3600
+
+        busy_seconds = 0
+        for slot in slots:
+            s = max(slot.start_datetime, start)
+            e = min(slot.end_datetime, end)
+            busy_seconds += max(0, (e - s).total_seconds())
+
+        days = (end.date() - start.date()).days + 1
+        total_available = workday_hours * days
+
+        if total_available <= 0:
+            return 0
+
+        return round((busy_seconds / 3600) / total_available * 100)
+
+    # Формуємо звіт
+    machine_report = []
+    for machine in Machine.objects.all():
         row = {
-            "machine": machine,
-            "today": None,
-            "three_days": None,
-            "week": None,
-            "status": None,
+            "id": machine.id,
+            "name": machine.name,
+            "type": machine.get_type_display(),
+            "today": calc_load(machine, *ranges["today"], "machine"),
+            "three_days": calc_load(machine, *ranges["three_days"], "machine"),
+            "week": calc_load(machine, *ranges["week"], "machine"),
         }
+        row["status"] = (
+            "green" if row["week"] < 70 else
+            "yellow" if row["week"] < 90 else
+            "red"
+        )
+        machine_report.append(row)
 
-        # тривалість робочого дня
-        if machine.workday_start and machine.workday_end:
-            workday_hours = (
-                datetime.combine(today, machine.workday_end) -
-                datetime.combine(today, machine.workday_start)
-            ).seconds / 3600
-        else:
-            workday_hours = 8  # якщо не задано – дефолт
-
-        def calc_load(start, end):
-            slots = ProductionSlot.objects.filter(
-                machine=machine,
-                start_datetime__lt=end,
-                end_datetime__gt=start
-            )
-
-            busy_seconds = 0
-            for slot in slots:
-                s = max(slot.start_datetime, start)
-                e = min(slot.end_datetime, end)
-                busy_seconds += max(0, (e - s).total_seconds())
-
-            # доступний робочий час за період
-            days = (end.date() - start.date()).days + 1
-            available_hours = workday_hours * days
-
-            if available_hours == 0:
-                return 0
-
-            return round((busy_seconds / 3600) / available_hours * 100)
-
-        # розрахунок
-        row["today"] = calc_load(*ranges["today"])
-        row["three_days"] = calc_load(*ranges["three_days"])
-        row["week"] = calc_load(*ranges["week"])
-
-        # статус
-        week_load = row["week"]
-        if week_load < 70:
-            row["status"] = "green"
-        elif week_load < 90:
-            row["status"] = "yellow"
-        else:
-            row["status"] = "red"
-
-        report.append(row)
+    workunit_report = []
+    for unit in WorkUnit.objects.all():
+        row = {
+            "id": unit.id,
+            "name": unit.name,
+            "type": unit.get_type_display(),
+            "today": calc_load(unit, *ranges["today"], "work_unit"),
+            "three_days": calc_load(unit, *ranges["three_days"], "work_unit"),
+            "week": calc_load(unit, *ranges["week"], "work_unit"),
+        }
+        row["status"] = (
+            "green" if row["week"] < 70 else
+            "yellow" if row["week"] < 90 else
+            "red"
+        )
+        workunit_report.append(row)
 
     return render(request, "machine_load_report.html", {
-        "report": report
+        "machine_report": machine_report,
+        "workunit_report": workunit_report,
     })
 
 def machine_detail_report(request, machine_id):

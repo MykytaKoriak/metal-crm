@@ -2,29 +2,40 @@
 {% load static %}
 
 {% block content %}
-<h1>Завантаженість верстатів</h1>
+<h1>Завантаженість виробництва</h1>
 
 <style>
     .status-green {
         color: #3bb54a;
         font-weight: bold;
     }
-
     .status-yellow {
         color: #e6a000;
         font-weight: bold;
     }
-
     .status-red {
         color: #d70000;
         font-weight: bold;
     }
+
+    h2 {
+        margin-top: 40px;
+        margin-bottom: 15px;
+    }
 </style>
+
+
+<!-- ========================= -->
+<!--   РОЗДІЛ 1 — ВЕРСТАТИ     -->
+<!-- ========================= -->
+
+<h2>Верстати</h2>
 
 <table class="table table-striped">
     <thead>
     <tr>
-        <th>Верстат</th>
+        <th>Назва</th>
+        <th>Тип</th>
         <th>Сьогодні</th>
         <th>3 дні</th>
         <th>Тиждень</th>
@@ -33,23 +44,70 @@
     </thead>
 
     <tbody>
-    {% for row in report %}
+    {% for row in machine_report %}
     <tr>
         <td>
-            <a href="{% url 'machine_detail_report' row.machine.id %}">
-                {{ row.machine.name }}
+            <a href="{% url 'machine_detail_report' row.id %}">
+                {{ row.name }}
             </a>
         </td>
+        <td>{{ row.type }}</td>
+
         <td>{{ row.today }}%</td>
         <td>{{ row.three_days }}%</td>
         <td>{{ row.week }}%</td>
+
         <td>
             {% if row.status == "green" %}
-            <span class="status-green">● Зелений</span>
+                <span class="status-green">● Зелений</span>
             {% elif row.status == "yellow" %}
-            <span class="status-yellow">● Жовтий</span>
+                <span class="status-yellow">● Жовтий</span>
             {% else %}
-            <span class="status-red">● Червоний</span>
+                <span class="status-red">● Червоний</span>
+            {% endif %}
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+
+
+<!-- =============================== -->
+<!--   РОЗДІЛ 2 — ВИРОБНИЧІ ДІЛЬНИЦІ -->
+<!-- =============================== -->
+
+<h2>Виробничі дільниці</h2>
+
+<table class="table table-striped">
+    <thead>
+    <tr>
+        <th>Назва</th>
+        <th>Тип</th>
+        <th>Сьогодні</th>
+        <th>3 дні</th>
+        <th>Тиждень</th>
+        <th>Статус</th>
+    </tr>
+    </thead>
+
+    <tbody>
+    {% for row in workunit_report %}
+    <tr>
+        <td>{{ row.name }}</td>
+        <td>{{ row.type }}</td>
+
+        <td>{{ row.today }}%</td>
+        <td>{{ row.three_days }}%</td>
+        <td>{{ row.week }}%</td>
+
+        <td>
+            {% if row.status == "green" %}
+                <span class="status-green">● Зелений</span>
+            {% elif row.status == "yellow" %}
+                <span class="status-yellow">● Жовтий</span>
+            {% else %}
+                <span class="status-red">● Червоний</span>
             {% endif %}
         </td>
     </tr>
