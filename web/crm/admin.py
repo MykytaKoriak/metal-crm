@@ -1,3 +1,5 @@
+from multiprocessing.connection import Client
+
 from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
@@ -151,7 +153,7 @@ class OrderAdmin(admin.ModelAdmin):
 class TaskAdmin(admin.ModelAdmin):
     list_display = [
         "title_link",     # клик по задаче ведёт на картку клієнта
-        "contact",
+        "contact_link",
         "assigned_to",
         "assigned_by",
         "date",           # ← ВАЖНО: date, не due_date
@@ -176,5 +178,11 @@ class TaskAdmin(admin.ModelAdmin):
 
     @admin.display(description="Назва задачі")
     def title_link(self, obj):
-        url = reverse("admin:crm_contact_change", args=[obj.contact_id])
+        url = reverse("admin:crm_task_change", args=[obj.id])
         return format_html('<a href="{}">{}</a>', url, obj.title)
+
+    @admin.display(description="Клієнт")
+    def contact_link(self, obj):
+        client = Contact.objects.get(id=obj.contact.id)
+        url = reverse("admin:crm_contact_change", args=[obj.contact_id])
+        return format_html('<a href="{}">{}</a>', url, client.name)
