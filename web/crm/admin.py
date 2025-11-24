@@ -1,8 +1,8 @@
 from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
-from .models import (Contact, Tag, Order, Task)
-from manufacture.models import  ProductionSlot
+from .models import Contact, Tag, Order, Task, Product, OrderItem
+from manufacture.models import ProductionSlot
 
 
 @admin.register(Tag)
@@ -14,7 +14,7 @@ class TagAdmin(admin.ModelAdmin):
 class OrderInline(admin.TabularInline):
     model = Order
     extra = 0
-    fields = ["title", "status", "deadline", "created_at", "payment_amount"]
+    fields = ["status", "deadline", "created_at", "payment_amount"]
     readonly_fields = ["created_at"]
 
 
@@ -52,13 +52,26 @@ class ContactAdmin(admin.ModelAdmin):
 class ProductionSlotInline(admin.TabularInline):
     model = ProductionSlot
     extra = 0
-    fields = ["stage", "machine", "work_unit", "start_datetime", "end_datetime", "comment"]
+    fields = ["machine", "work_unit", "start_datetime", "end_datetime", "comment"]
+
+
+@admin.register(Product)
+class ProductAdmin(admin.ModelAdmin):
+    list_display = ["name", "sku", "base_price", "is_active"]
+    list_filter = ["is_active"]
+    search_fields = ["name", "sku", "description"]
+
+
+class OrderItemInline(admin.TabularInline):
+    model = OrderItem
+    extra = 1
+    autocomplete_fields = ["product"]
+    fields = ["product", "quantity", "unit_price", "comment"]
 
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     list_display = [
-        "title",
         "contact",
         "status",
         "deadline",
@@ -68,16 +81,15 @@ class OrderAdmin(admin.ModelAdmin):
         "delivery_method",
     ]
     list_filter = ["status", "payment_type", "delivery_method"]
-    search_fields = ["title", "contact__name", "contact__phone", "contact__email", "tracking_number"]
+    search_fields = ["contact__name", "contact__phone", "contact__email", "tracking_number"]
     date_hierarchy = "created_at"
     ordering = ["-created_at"]
 
-    inlines = [ProductionSlotInline]
+    inlines = [OrderItemInline, ProductionSlotInline]
 
     fieldsets = (
         ("Основна інформація", {
             "fields": (
-                "title",
                 "contact",
                 "status",
                 ("deadline", "created_at"),
@@ -100,7 +112,39 @@ class OrderAdmin(admin.ModelAdmin):
         }),
     )
 
-    readonly_fields = ["created_at"]
+    readonly_fields = ["created_at", "items_total"]
+
+    fieldsets = (
+        ("Основна інформація", {
+            "fields": (
+                "contact",
+                "status",
+                ("deadline", "created_at"),
+                "comment",
+            )
+        }),
+        ("Доставка", {
+            "fields": (
+                "shipping_address",
+                "recipient",
+                "delivery_method",
+                "tracking_number",
+            ),
+        }),
+        ("Оплата", {
+            "fields": (
+                "payment_amount",
+                "payment_type",
+                "items_total",
+            )
+        }),
+    )
+
+
+    def items_total(self, obj):
+        return obj.calculate_items_total()
+    items_total.short_description = "Сума по позиціях"
+
 
 
 @admin.register(Task)

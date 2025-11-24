@@ -48,6 +48,73 @@ class Contact(models.Model):
         return self.name
 
 
+class Product(models.Model):
+    name = models.CharField("Назва продукту", max_length=255)
+    sku = models.CharField(
+        "Артикул / код",
+        max_length=100,
+        unique=True,
+        blank=True,
+        null=True,
+        help_text="Необов’язково, але бажано для уніфікації"
+    )
+    description = models.TextField("Опис", blank=True)
+    base_price = models.DecimalField(
+        "Базова ціна",
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    is_active = models.BooleanField("Активний", default=True)
+
+    class Meta:
+        verbose_name = "Продукт"
+        verbose_name_plural = "Продукти"
+        ordering = ["name"]
+
+    def __str__(self):
+        if self.sku:
+            return f"{self.name} ({self.sku})"
+        return self.name
+
+
+class OrderItem(models.Model):
+    order = models.ForeignKey(
+        "crm.Order",
+        related_name="items",
+        on_delete=models.CASCADE,
+        verbose_name="Замовлення",
+    )
+    product = models.ForeignKey(
+        Product,
+        related_name="order_items",
+        on_delete=models.PROTECT,
+        verbose_name="Продукт",
+    )
+    quantity = models.PositiveIntegerField("Кількість", default=1)
+    unit_price = models.DecimalField(
+        "Ціна за одиницю",
+        max_digits=10,
+        decimal_places=2,
+    )
+    comment = models.CharField("Коментар", max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = "Позиція замовлення"
+        verbose_name_plural = "Позиції замовлення"
+
+    def __str__(self):
+        return f"{self.product} x {self.quantity}"
+
+    @property
+    def total_price(self):
+        if self.unit_price is not None and self.quantity is not None:
+            return self.unit_price * self.quantity
+        return None
+
+
+
 class Order(models.Model):
     class Status(models.TextChoices):
         NEW = "new", "Новий"
@@ -70,7 +137,6 @@ class Order(models.Model):
         PICKUP = "pickup", "Самовивіз"
         OTHER = "other", "Інше"
 
-    title = models.CharField("Назва замовлення", max_length=255)
     contact = models.ForeignKey(
         "crm.Contact",
         related_name="orders",
@@ -138,7 +204,15 @@ class Order(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.title} ({self.get_status_display()})"
+        return f"{self.created_at} - {self.contact.name} - {self.calculate_items_total()} ({self.get_status_display()})"
+
+    def calculate_items_total(self):
+        from django.db.models import F, Sum
+        agg = self.items.aggregate(
+            total=Sum(F("unit_price") * F("quantity"))
+        )
+        return agg["total"] or 0
+
 
 
 class Task(models.Model):
