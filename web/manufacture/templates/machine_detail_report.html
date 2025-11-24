@@ -40,9 +40,9 @@
                             <li class="list-group-item px-0">
                                 <div><strong>{{ start|time:"H:i" }} – {{ end|time:"H:i" }}</strong></div>
                                 <div>
-                                    Замовлення:
+                                    Коментар:
                                     <a href="{% url 'admin:crm_order_change' slot.order.id %}">
-                                        {{ slot.order.title }}
+                                        {{ slot.comment }}
                                     </a>
                                 </div>
                                 <div>
