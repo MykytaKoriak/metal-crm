@@ -9,10 +9,12 @@
         color: #3bb54a;
         font-weight: bold;
     }
+
     .status-yellow {
         color: #e6a000;
         font-weight: bold;
     }
+
     .status-red {
         color: #d70000;
         font-weight: bold;
@@ -59,18 +61,17 @@
 
         <td>
             {% if row.status == "green" %}
-                <span class="status-green">● Зелений</span>
+            <span class="status-green">● Зелений</span>
             {% elif row.status == "yellow" %}
-                <span class="status-yellow">● Жовтий</span>
+            <span class="status-yellow">● Жовтий</span>
             {% else %}
-                <span class="status-red">● Червоний</span>
+            <span class="status-red">● Червоний</span>
             {% endif %}
         </td>
     </tr>
     {% endfor %}
     </tbody>
 </table>
-
 
 
 <!-- =============================== -->
@@ -94,7 +95,11 @@
     <tbody>
     {% for row in workunit_report %}
     <tr>
-        <td>{{ row.name }}</td>
+        <td>
+            <a href="{% url 'workunit_detail_report' row.id %}">
+                {{ row.name }}
+            </a>
+        </td>
         <td>{{ row.type }}</td>
 
         <td>{{ row.today }}%</td>
@@ -103,11 +108,11 @@
 
         <td>
             {% if row.status == "green" %}
-                <span class="status-green">● Зелений</span>
+            <span class="status-green">● Зелений</span>
             {% elif row.status == "yellow" %}
-                <span class="status-yellow">● Жовтий</span>
+            <span class="status-yellow">● Жовтий</span>
             {% else %}
-                <span class="status-red">● Червоний</span>
+            <span class="status-red">● Червоний</span>
             {% endif %}
         </td>
     </tr>

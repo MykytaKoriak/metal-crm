@@ -45,9 +45,9 @@ def machine_load_report(request):
             day_end = time(17, 0)
 
         workday_hours = (
-            datetime.combine(today, day_end) -
-            datetime.combine(today, day_start)
-        ).seconds / 3600
+                                datetime.combine(today, day_end) -
+                                datetime.combine(today, day_start)
+                        ).seconds / 3600
 
         busy_seconds = 0
         for slot in slots:
@@ -102,6 +102,7 @@ def machine_load_report(request):
         "machine_report": machine_report,
         "workunit_report": workunit_report,
     })
+
 
 def machine_detail_report(request, machine_id):
     tz = get_current_timezone()
@@ -158,8 +159,8 @@ def machine_detail_report(request, machine_id):
 
         days.append({
             "date": day,
-            "slots": intervals,       # список (start, end, slot)
-            "free": free_intervals,   # список (start, end)
+            "slots": intervals,  # список (start, end, slot)
+            "free": free_intervals,  # список (start, end)
         })
 
     context = {
@@ -167,3 +168,66 @@ def machine_detail_report(request, machine_id):
         "days": days,
     }
     return render(request, "machine_detail_report.html", context)
+
+
+def workunit_detail_report(request, workunit_id):
+    tz = get_current_timezone()
+    today = datetime.now(tz).date()
+
+    work_unit = get_object_or_404(WorkUnit, pk=workunit_id)
+
+    # робочий день для дільниці
+    # (якщо захочеш – можна додати workday_start/workday_end і сюди, зараз беремо дефолт 08–17)
+    day_start_time = time(8, 0)
+    day_end_time = time(17, 0)
+
+    days = []
+
+    for i in range(8):  # сьогодні + 7 днів
+        day = today + timedelta(days=i)
+        day_start = make_aware(datetime.combine(day, day_start_time))
+        day_end = make_aware(datetime.combine(day, day_end_time))
+
+        # слоти для цієї дільниці, які хоч якось перетинають день
+        slots_qs = ProductionSlot.objects.filter(
+            work_unit=work_unit,
+            start_datetime__lt=day_end,
+            end_datetime__gt=day_start,
+        ).select_related("order")
+
+        # приводимо до відрізків всередині робочого дня
+        intervals = []
+        for slot in slots_qs:
+            s = max(slot.start_datetime, day_start)
+            e = min(slot.end_datetime, day_end)
+            if s < e:
+                intervals.append((s, e, slot))
+
+        # сортуємо по часу початку
+        intervals.sort(key=lambda x: x[0])
+
+        # шукаємо вільні проміжки
+        free_intervals = []
+        current = day_start
+        for s, e, slot in intervals:
+            if s > current:
+                free_intervals.append((current, s))
+            if e > current:
+                current = e
+        if current < day_end:
+            free_intervals.append((current, day_end))
+
+        days.append({
+            "date": day,
+            "slots": intervals,  # список (start, end, slot)
+            "free": free_intervals,  # список (start, end)
+        })
+
+    context = {
+        "work_unit": work_unit,
+        "days": days,
+    }
+
+    # якщо machine_detail_report рендериш як "machine_detail_report.html" без префікса,
+    # зроби тут аналогічно: "workunit_detail_report.html"
+    return render(request, "workunit_detail_report.html", context)
