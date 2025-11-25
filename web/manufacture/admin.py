@@ -1,5 +1,8 @@
 from django.contrib import admin
 from .models import Machine, WorkUnit, ProductionSlot
+from django.urls import path
+from django.template.response import TemplateResponse
+from django.utils.dateparse import parse_datetime
 
 
 @admin.register(Machine)
@@ -28,7 +31,44 @@ class WorkUnitAdmin(admin.ModelAdmin):
 
 @admin.register(ProductionSlot)
 class ProductionSlotAdmin(admin.ModelAdmin):
-    list_display = ["order", "machine", "work_unit", "start_datetime", "end_datetime"]
-    list_filter = ["machine", "work_unit"]
-    search_fields = ["order__title", "order__contact__name", "comment"]
-    autocomplete_fields = ["order", "machine", "work_unit"]
+    list_display = ("order", "machine", "work_unit", "start_datetime", "end_datetime")
+    list_filter = ("machine", "work_unit")
+    search_fields = ("order__id", "order__name")  # підстав свої поля в Order
+
+    # 1) додаємо власний URL /calendar/ до маршрутизації цієї моделі
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "calendar/",
+                self.admin_site.admin_view(self.calendar_view),
+                name="manufacture_productionslot_calendar",
+            ),
+        ]
+        return custom_urls + urls
+
+    # 2) view, який рендерить шаблон з календарем
+    def calendar_view(self, request):
+        context = dict(
+            self.admin_site.each_context(request),
+            opts=self.model._meta,
+        )
+        return TemplateResponse(request, "admin/productionslot_calendar.html", context)
+
+    # 3) підстановка start/end із параметрів URL у форму створення
+    def get_changeform_initial_data(self, request):
+        initial = super().get_changeform_initial_data(request)
+        start = request.GET.get("start")
+        end = request.GET.get("end")
+
+        if start:
+            dt = parse_datetime(start)
+            if dt:
+                initial["start_datetime"] = dt
+
+        if end:
+            dt = parse_datetime(end)
+            if dt:
+                initial["end_datetime"] = dt
+
+        return initial

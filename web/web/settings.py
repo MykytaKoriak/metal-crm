@@ -111,10 +111,16 @@ JAZZMIN_SETTINGS = {
                 "name": "Завантаженість верстатів",
                 "url": "machine_load_report",
                 "icon": "fas fa-chart-line",
+            },
+            {
+                "name": "Календар слотів",
+                "url": "admin:manufacture_productionslot_calendar",
+                "icon": "fas fa-calendar-alt",
             }
         ]
     }
 }
+
 
 
 # Internationalization

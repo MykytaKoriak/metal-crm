@@ -2,6 +2,8 @@ from datetime import datetime, time, timedelta
 from django.shortcuts import get_object_or_404, render
 from django.utils.timezone import make_aware, get_current_timezone
 from .models import Machine, WorkUnit, ProductionSlot
+from django.http import JsonResponse
+from django.utils.timezone import localtime
 
 
 def machine_load_report(request):
@@ -231,3 +233,31 @@ def workunit_detail_report(request, workunit_id):
     # якщо machine_detail_report рендериш як "machine_detail_report.html" без префікса,
     # зроби тут аналогічно: "workunit_detail_report.html"
     return render(request, "workunit_detail_report.html", context)
+
+def production_slot_events(request):
+    """
+    Повертає слоти у форматі, який розуміє FullCalendar.
+    """
+    qs = ProductionSlot.objects.exclude(
+        start_datetime__isnull=True
+    ).exclude(
+        end_datetime__isnull=True
+    ).select_related("order", "machine", "work_unit")
+
+    events = []
+    for slot in qs:
+        # Робимо адекватний заголовок для події
+        location = slot.machine or slot.work_unit
+        title = f"{slot.order}"
+        if location:
+            title += f" – {location}"
+
+        events.append({
+            "id": slot.id,
+            "title": title,
+            "start": localtime(slot.start_datetime).isoformat(),
+            "end": localtime(slot.end_datetime).isoformat(),
+        })
+
+    return JsonResponse(events, safe=False)
+
