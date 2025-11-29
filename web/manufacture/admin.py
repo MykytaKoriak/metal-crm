@@ -3,6 +3,8 @@ from .models import Machine, WorkUnit, ProductionSlot
 from django.urls import path
 from django.template.response import TemplateResponse
 from django.utils.dateparse import parse_datetime
+from django.http import HttpResponseRedirect
+from django.urls import reverse
 
 
 @admin.register(Machine)
@@ -72,3 +74,21 @@ class ProductionSlotAdmin(admin.ModelAdmin):
                 initial["end_datetime"] = dt
 
         return initial
+
+
+    def response_add(self, request, obj, post_url_continue=None):
+        """
+        Після створення нового ProductionSlot -> перейти на календар.
+        """
+        url = reverse("admin:manufacture_productionslot_calendar")
+        return HttpResponseRedirect(url)
+
+    def response_change(self, request, obj):
+        """
+        Після редагування також перейти на календар (опційно).
+        Якщо не хочеш — видали цей метод.
+        """
+        url = reverse("admin:manufacture_productionslot_calendar")
+        return HttpResponseRedirect(url)
+
+
