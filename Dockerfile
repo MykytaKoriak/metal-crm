@@ -31,6 +31,9 @@ EXPOSE 8000
 # 1) миграции
 # 2) сборка статики
 # 3) запуск сервера
-CMD sh -c "python manage.py migrate && \
+CMD sh -c "python manage.py makemigrations crm && \
+           python manage.py makemigrations manufacture && \
+           python manage.py migrate && \
            python manage.py collectstatic --noinput && \
+           python manage.py seed_demo_data && \
            python manage.py runserver 0.0.0.0:8000"

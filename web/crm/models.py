@@ -1,6 +1,7 @@
 from django.db import models
 from django.conf import settings  # ← ДОЛЖЕН быть только этот импорт
 from manufacture.models import ProductionSlot
+from django.core.exceptions import ValidationError
 
 
 class Tag(models.Model):
@@ -14,28 +15,110 @@ class Tag(models.Model):
         return self.name
 
 
+class Client(models.Model):
+    class ClientType(models.TextChoices):
+        FOP = "fop", "ФОП"
+        TOV = "tov", "ТОВ"
+        INDIVIDUAL = "individual", "Фізособа"
+
+    class Source(models.TextChoices):
+        INSTAGRAM = "instagram", "Instagram"
+        FACEBOOK = "facebook", "Facebook"
+        PROM = "prom", "Prom.ua"
+        OLX = "olx", "OLX"
+        PHONE = "phone", "Телефон"
+        RECOMMENDATION = "recommendation", "Рекомендація"
+        WORD_OF_MOUTH = "word_of_mouth", "Сарафанне радіо"
+        OTHER = "other", "Інше"
+
+    name = models.CharField("Ім’я / назва клієнта", max_length=255)
+
+    client_type = models.CharField(
+        "Тип клієнта",
+        max_length=16,
+        choices=ClientType.choices,
+        default=ClientType.INDIVIDUAL,
+    )
+
+    tax_code = models.CharField(
+        "Код ЄДРПОУ / РНОКПП",
+        max_length=16,
+        blank=True,
+        help_text="Обов’язково для ФОП/ТОВ.",
+    )
+
+    phones = models.CharField("Телефони", max_length=255, blank=True, help_text="Кілька через кому")
+    email = models.EmailField("Email", blank=True)
+
+    # ✅ додаємо джерело і теги на рівні клієнта (дуже корисно)
+    source = models.CharField(
+        "Джерело клієнта",
+        max_length=32,
+        choices=Source.choices,
+        default=Source.OTHER,
+    )
+    tags = models.ManyToManyField("Tag", related_name="clients", blank=True)
+
+    notes = models.TextField("Примітки", blank=True)
+
+    created_at = models.DateTimeField("Створено", auto_now_add=True)
+    updated_at = models.DateTimeField("Оновлено", auto_now=True)
+
+    class Meta:
+        verbose_name = "Клієнт"
+        verbose_name_plural = "Клієнти"
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        super().clean()
+        if self.client_type in (self.ClientType.FOP, self.ClientType.TOV) and not self.tax_code.strip():
+            raise ValidationError({"tax_code": "Для ФОП/ТОВ код ЄДРПОУ/РНОКПП обов’язковий."})
+        if self.tax_code:
+            t = self.tax_code.strip()
+            if not t.isdigit():
+                raise ValidationError({"tax_code": "Код має містити лише цифри."})
+            if self.client_type == self.ClientType.TOV and len(t) != 8:
+                raise ValidationError({"tax_code": "Для ТОВ очікується ЄДРПОУ з 8 цифр."})
+            if self.client_type == self.ClientType.FOP and len(t) not in (8, 10):
+                raise ValidationError({"tax_code": "Для ФОП очікується 8 або 10 цифр."})
+
+
 class Contact(models.Model):
     class Source(models.TextChoices):
-        INSTAGRAM = 'instagram', 'Instagram'
-        FACEBOOK = 'facebook', 'Facebook'
-        PROM = 'prom', 'Prom.ua'
-        OLX = 'olx', 'OLX'
-        PHONE = 'phone', 'Телефон'
-        RECOMMENDATION = 'recommendation', 'Рекомендація'
-        WORD_OF_MOUTH = 'word_of_mouth', 'Сарафанне радіо'
-        OTHER = 'other', 'Інше'
+        INSTAGRAM = "instagram", "Instagram"
+        FACEBOOK = "facebook", "Facebook"
+        PROM = "prom", "Prom.ua"
+        OLX = "olx", "OLX"
+        PHONE = "phone", "Телефон"
+        RECOMMENDATION = "recommendation", "Рекомендація"
+        WORD_OF_MOUTH = "word_of_mouth", "Сарафанне радіо"
+        OTHER = "other", "Інше"
 
-    name = models.CharField("Ім’я / назва компанії", max_length=255)
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.PROTECT,
+        related_name="contacts",
+        verbose_name="Клієнт",
+    )
+
+    full_name = models.CharField("ПІБ", max_length=255)
+    position = models.CharField("Посада", max_length=255, blank=True)
     phone = models.CharField("Телефон", max_length=50, blank=True)
     email = models.EmailField("Email", blank=True)
-    tags = models.ManyToManyField(Tag, related_name='contacts', blank=True)
+
+    # ✅ повертаємо теги і джерело саме на контакті (як ти і хочеш)
+    tags = models.ManyToManyField("Tag", related_name="contacts", blank=True)
     source = models.CharField(
         "Джерело контакту",
         max_length=32,
         choices=Source.choices,
         default=Source.OTHER,
     )
-    comment = models.TextField("Внутрішній коментар", blank=True)
+
+    notes = models.TextField("Примітки", blank=True)
 
     created_at = models.DateTimeField("Створено", auto_now_add=True)
     updated_at = models.DateTimeField("Оновлено", auto_now=True)
@@ -43,12 +126,14 @@ class Contact(models.Model):
     class Meta:
         verbose_name = "Контакт"
         verbose_name_plural = "Контакти"
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["client", "full_name"])]
 
     def __str__(self):
-        return self.name
+        return f"{self.full_name} ({self.client})"
 
     def has_delete_permission(self, request, obj=None):
-        return False  # нельзя удалить нигде в админке
+        return False
 
 
 class Product(models.Model):
@@ -212,7 +297,7 @@ class Order(models.Model):
 
     def __str__(self):
         date_str = self.created_at.strftime("%d.%m.%Y %H:%M")
-        return f"{date_str} – {self.contact.name} – {self.calculate_items_total()} ({self.get_status_display()})"
+        return f"{date_str} – {self.contact.full_name} – {self.calculate_items_total()} ({self.get_status_display()})"
 
     def calculate_items_total(self):
         from django.db.models import F, Sum

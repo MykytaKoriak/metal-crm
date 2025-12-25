@@ -3,7 +3,7 @@ from multiprocessing.connection import Client
 from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
-from .models import Contact, Tag, Order, Task, Product, OrderItem
+from .models import Contact, Tag, Order, Task, Product, OrderItem, Client
 from manufacture.models import ProductionSlot
 
 
@@ -27,28 +27,48 @@ class TaskInline(admin.TabularInline):
     readonly_fields = ["assigned_by", "created_at"]
 
 
-@admin.register(Contact)
-class ContactAdmin(admin.ModelAdmin):
-    list_display = ['name', 'phone', 'email', 'source', 'created_at']
-    list_filter = ['source', 'tags']  # фільтрація за джерелом + тегами
-    search_fields = ['name', 'phone', 'email']
-    filter_horizontal = ['tags']  # зручний вибір тегів (Jazzmin зробить красиво)
+class ContactInline(admin.TabularInline):
+    model = Contact
+    extra = 0
+    fields = ("full_name", "position", "phone", "email", "source", "created_at")
+    readonly_fields = ("created_at",)
+    show_change_link = True
 
-    inlines = [OrderInline, TaskInline]
+
+@admin.register(Client)
+class ClientAdmin(admin.ModelAdmin):
+    list_display = ("name", "client_type", "tax_code", "phones", "email", "source", "created_at")
+    list_filter = ("client_type", "source", "tags")
+    search_fields = ("name", "tax_code", "phones", "email")
+    filter_horizontal = ("tags",)
+    readonly_fields = ("created_at", "updated_at")
+
+    inlines = [ContactInline]
 
     fieldsets = (
         ("Основна інформація", {
-            'fields': ('name', 'phone', 'email', 'source', 'tags')
+            "fields": ("name", "client_type", "tax_code", "phones", "email", "source", "tags")
         }),
-        ("Коментар", {
-            'fields': ('comment',),
-        }),
-        ("Службова інформація", {
-            'fields': ('created_at', 'updated_at'),
-        }),
+        ("Примітки", {"fields": ("notes",)}),
+        ("Службова інформація", {"fields": ("created_at", "updated_at")}),
     )
 
-    readonly_fields = ['created_at', 'updated_at']
+
+@admin.register(Contact)
+class ContactAdmin(admin.ModelAdmin):
+    list_display = ("full_name", "client", "position", "phone", "email", "source", "created_at")
+    list_filter = ("source", "tags", "created_at")
+    search_fields = ("full_name", "position", "phone", "email", "client__name", "client__tax_code")
+    autocomplete_fields = ("client",)
+    filter_horizontal = ("tags",)
+    readonly_fields = ("created_at", "updated_at")
+
+    fieldsets = (
+        ("Прив’язка", {"fields": ("client",)}),
+        ("Дані контакту", {"fields": ("full_name", "position", "phone", "email", "source", "tags")}),
+        ("Примітки", {"fields": ("notes",)}),
+        ("Службова інформація", {"fields": ("created_at", "updated_at")}),
+    )
 
 
 class ProductionSlotInline(admin.TabularInline):
@@ -83,7 +103,7 @@ class OrderAdmin(admin.ModelAdmin):
         "delivery_method",
     ]
     list_filter = ["status", "payment_type", "delivery_method"]
-    search_fields = ["contact__name", "contact__phone", "contact__email", "tracking_number"]
+    search_fields = ["contact__full_name", "contact__phone", "contact__email", "tracking_number"]
     date_hierarchy = "created_at"
     ordering = ["-created_at"]
 
@@ -169,7 +189,7 @@ class TaskAdmin(admin.ModelAdmin):
         "status",
     ]
 
-    search_fields = ["title", "contact__name", "contact__phone", "contact__email"]
+    search_fields = ["title", "contact__full_name", "contact__phone", "contact__email"]
     ordering = ["date", "id"]
 
     def get_queryset(self, request):
@@ -185,4 +205,4 @@ class TaskAdmin(admin.ModelAdmin):
     def contact_link(self, obj):
         client = Contact.objects.get(id=obj.contact.id)
         url = reverse("admin:crm_contact_change", args=[obj.contact_id])
-        return format_html('<a href="{}">{}</a>', url, client.name)
+        return format_html('<a href="{}">{}</a>', url, client.full_name)
