@@ -290,6 +290,50 @@ class Order(models.Model):
         blank=True,
     )
 
+    title = models.CharField(
+        "Назва замовлення (авто)",
+        max_length=500,
+        blank=True,
+        editable=False,
+        help_text="Формується автоматично з товарів у позиціях замовлення."
+    )
+
+    recipient_phone = models.CharField(
+        "Телефон отримувача",
+        max_length=50,
+        blank=True,
+    )
+
+    payment_terms = models.CharField(
+        "Умови оплати",
+        max_length=255,
+        blank=True,
+        help_text="Напр.: 50% передоплата / оплата при отриманні / оплата 3 дні після відвантаження"
+    )
+
+    def build_title_from_items(self) -> str:
+        # товари через кому, унікальні, у стабільному порядку
+        names = list(
+            self.items.select_related("product")
+            .values_list("product__name", flat=True)
+        )
+        # унікалізація зі збереженням порядку
+        seen = set()
+        uniq = []
+        for n in names:
+            if n and n not in seen:
+                seen.add(n)
+                uniq.append(n)
+        return ", ".join(uniq)
+
+    def refresh_title(self, save: bool = True):
+        new_title = self.build_title_from_items()
+        if new_title != (self.title or ""):
+            self.title = new_title
+            if save:
+                self.save(update_fields=["title"])
+
+
     class Meta:
         verbose_name = "Замовлення"
         verbose_name_plural = "Замовлення"
@@ -297,7 +341,8 @@ class Order(models.Model):
 
     def __str__(self):
         date_str = self.created_at.strftime("%d.%m.%Y %H:%M")
-        return f"{date_str} – {self.contact.full_name} – {self.calculate_items_total()} ({self.get_status_display()})"
+        title = self.title or "Без товарів"
+        return f"{date_str} – {self.contact.full_name} – {title} – {self.calculate_items_total()} ({self.get_status_display()})"
 
     def calculate_items_total(self):
         from django.db.models import F, Sum

@@ -94,6 +94,7 @@ class OrderItemInline(admin.TabularInline):
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     list_display = [
+        "title_display",
         "contact",
         "status",
         "deadline",
@@ -103,69 +104,80 @@ class OrderAdmin(admin.ModelAdmin):
         "delivery_method",
     ]
     list_filter = ["status", "payment_type", "delivery_method"]
-    search_fields = ["contact__full_name", "contact__phone", "contact__email", "tracking_number"]
+    search_fields = ["title", "contact__full_name", "contact__phone", "contact__email", "tracking_number"]
     date_hierarchy = "created_at"
     ordering = ["-created_at"]
 
     inlines = [OrderItemInline, ProductionSlotInline]
 
-    fieldsets = (
-        ("Основна інформація", {
-            "fields": (
-                "contact",
-                "status",
-                ("deadline", "created_at"),
-                "comment",
-            )
-        }),
-        ("Доставка", {
-            "fields": (
-                "shipping_address",
-                "recipient",
-                "delivery_method",
-                "tracking_number",
-            ),
-        }),
-        ("Оплата", {
-            "fields": (
-                "payment_amount",
-                "payment_type",
-            )
-        }),
-    )
-
-    readonly_fields = ["created_at", "items_total"]
+    readonly_fields = ["created_at", "items_total", "title", "copy_delivery_request"]
 
     fieldsets = (
         ("Основна інформація", {
             "fields": (
                 "contact",
                 "status",
+                "title",
                 ("deadline", "created_at"),
                 "comment",
             )
         }),
         ("Доставка", {
             "fields": (
-                "shipping_address",
-                "recipient",
-                "delivery_method",
+                "delivery_method",      # спосіб доставки
+                "shipping_address",     # адреса/відділення
+                "recipient",            # ім’я отримувача
+                "recipient_phone",      # ✅ нове поле
                 "tracking_number",
+                "copy_delivery_request" # ✅ копіювання в 1 клік
             ),
         }),
         ("Оплата", {
             "fields": (
-                "payment_amount",
                 "payment_type",
+                "payment_terms",        # ✅ нове поле
+                "payment_amount",
                 "items_total",
             )
         }),
     )
 
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        # Після того як інлайни (OrderItem) збережені — перераховуємо title
+        obj = form.instance
+        obj.refresh_title(save=True)
+
+    @admin.display(description="Назва замовлення")
+    def title_display(self, obj):
+        return obj.title or "—"
 
     def items_total(self, obj):
         return obj.calculate_items_total()
     items_total.short_description = "Сума по позиціях"
+
+    @admin.display(description="Запит даних для доставки (копіювання)")
+    def copy_delivery_request(self, obj):
+        text = (
+            "Будь ласка, надайте інформацію для доставки:\n"
+            "• ПІБ отримувача\n"
+            "• Номер телефону\n"
+            "• Місто\n"
+            "• Відділення/адреса доставки\n"
+            "• Перевізник\n"
+        )
+        # Кнопка копіювання прямо в адмінці (без окремих файлів JS)
+        return format_html(
+            """
+            <div style="max-width: 700px;">
+              <textarea id="delivery_req" rows="6" style="width:100%; font-family: monospace;">{}</textarea>
+              <button type="button" class="button" onclick="navigator.clipboard.writeText(document.getElementById('delivery_req').value)">
+                Скопіювати в буфер
+              </button>
+            </div>
+            """,
+            text
+        )
 
 
 
