@@ -81,7 +81,25 @@ class ProductionSlotInline(admin.TabularInline):
 class ProductAdmin(admin.ModelAdmin):
     list_display = ["name", "sku", "base_price", "is_active"]
     list_filter = ["is_active"]
-    search_fields = ["name", "sku", "description"]
+    search_fields = ["name", "sku", "description", "technical_description"]
+
+    fieldsets = (
+        ("Основна інформація", {
+            "fields": ("name", "sku", "is_active")
+        }),
+        ("Опис", {
+            "fields": ("description", "technical_description")
+        }),
+        ("Ціна", {
+            "fields": ("base_price",)
+        }),
+        ("Маркетплейси", {
+            "fields": ("prom_url", "rozetka_url", "olx_url", "site_url")
+        }),
+        ("Файли та виробництво", {
+            "fields": ("photos_url", "production_norms_url")
+        }),
+    )
 
 
 class OrderItemInline(admin.TabularInline):

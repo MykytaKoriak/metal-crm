@@ -146,7 +146,10 @@ class Product(models.Model):
         null=True,
         help_text="Необов’язково, але бажано для уніфікації"
     )
+
     description = models.TextField("Опис", blank=True)
+    technical_description = models.TextField("Технічний опис", blank=True)
+
     base_price = models.DecimalField(
         "Базова ціна",
         max_digits=10,
@@ -154,6 +157,24 @@ class Product(models.Model):
         null=True,
         blank=True,
     )
+
+    # Маркетплейси
+    prom_url = models.URLField("Prom.ua", blank=True)
+    rozetka_url = models.URLField("Rozetka", blank=True)
+    olx_url = models.URLField("OLX", blank=True)
+    site_url = models.URLField("Сайт", blank=True)
+
+    # Медіа / виробництво
+    photos_url = models.URLField(
+        "Посилання на фото",
+        blank=True,
+        help_text="Google Drive / Dropbox / CDN"
+    )
+    production_norms_url = models.URLField(
+        "Норми виробництва (Google Drive)",
+        blank=True
+    )
+
     is_active = models.BooleanField("Активний", default=True)
 
     class Meta:
@@ -162,12 +183,7 @@ class Product(models.Model):
         ordering = ["name"]
 
     def __str__(self):
-        if self.sku:
-            return f"{self.name} ({self.sku})"
-        return self.name
-
-    def has_delete_permission(self, request, obj=None):
-        return False  # нельзя удалить нигде в админке
+        return f"{self.name} ({self.sku})" if self.sku else self.name
 
 
 
