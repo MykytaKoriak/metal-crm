@@ -5,7 +5,10 @@ from .models import Machine, WorkUnit, ProductionSlot
 from django.http import JsonResponse
 from django.utils.timezone import localtime
 
+from core.access import INTERNAL_ROLES, roles_required
 
+
+@roles_required(*INTERNAL_ROLES)
 def machine_load_report(request):
     tz = get_current_timezone()
     today = datetime.now(tz).date()
@@ -106,6 +109,7 @@ def machine_load_report(request):
     })
 
 
+@roles_required(*INTERNAL_ROLES)
 def machine_detail_report(request, machine_id):
     tz = get_current_timezone()
     today = datetime.now(tz).date()
@@ -172,6 +176,7 @@ def machine_detail_report(request, machine_id):
     return render(request, "machine_detail_report.html", context)
 
 
+@roles_required(*INTERNAL_ROLES)
 def workunit_detail_report(request, workunit_id):
     tz = get_current_timezone()
     today = datetime.now(tz).date()
@@ -234,6 +239,8 @@ def workunit_detail_report(request, workunit_id):
     # зроби тут аналогічно: "workunit_detail_report.html"
     return render(request, "workunit_detail_report.html", context)
 
+
+@roles_required(*INTERNAL_ROLES)
 def production_slot_events(request):
     """
     Повертає слоти у форматі, який розуміє FullCalendar.

@@ -33,8 +33,11 @@ document.addEventListener('DOMContentLoaded', function() {
     events: "{% url 'production_slot_events' %}",
 
     // дозволяємо виділяти діапазон часу
-    selectable: true,
+    selectable: {{ can_add_slots|yesno:"true,false" }},
     select: function(info) {
+      if (!{{ can_add_slots|yesno:"true,false" }}) {
+        return;
+      }
       const start = info.startStr;
       const end = info.endStr;
 
@@ -46,6 +49,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // клік по вже існуючому слоту -> редагування
     eventClick: function(info) {
+      if (!{{ can_view_slots|yesno:"true,false" }}) {
+        return;
+      }
       const url = `/admin/manufacture/productionslot/${info.event.id}/change/`;
       window.location.href = url;
     }

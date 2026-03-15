@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.core.exceptions import PermissionDenied
 from .models import Machine, WorkUnit, ProductionSlot
 from django.urls import path
 from django.template.response import TemplateResponse
@@ -51,9 +52,13 @@ class ProductionSlotAdmin(admin.ModelAdmin):
 
     # 2) view, який рендерить шаблон з календарем
     def calendar_view(self, request):
+        if not self.has_view_permission(request):
+            raise PermissionDenied
         context = dict(
             self.admin_site.each_context(request),
             opts=self.model._meta,
+            can_add_slots=self.has_add_permission(request),
+            can_view_slots=self.has_view_permission(request),
         )
         return TemplateResponse(request, "admin/productionslot_calendar.html", context)
 

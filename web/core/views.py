@@ -1,13 +1,13 @@
-from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.shortcuts import render
 from django.utils import timezone
 
 from crm.models import Task
+from .access import INTERNAL_ROLES, roles_required
 from .models import UserProfile
 
 
-@login_required
+@roles_required(*INTERNAL_ROLES)
 def my_account(request):
     profile, _ = UserProfile.objects.get_or_create(user=request.user)
     today = timezone.localdate()
