@@ -18,6 +18,7 @@ from manufacture.models import (
     Machine,
     WorkUnit,
     ProductionSlot,
+    ProductionStage,
 )
 
 
@@ -186,12 +187,27 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("✔ Products ready"))
 
         # ------------------------------------------------------------------
+        # PRODUCTION RESOURCES
+        # ------------------------------------------------------------------
+        laser_machine, _ = Machine.objects.get_or_create(
+            name="Laser Demo",
+            defaults={"type": Machine.MachineType.LASER},
+        )
+        painting_unit, _ = WorkUnit.objects.get_or_create(
+            name="Painting Demo",
+            defaults={"type": WorkUnit.UnitType.PAINTING},
+        )
+
+        self.stdout.write(self.style.SUCCESS("✔ Production resources ready"))
+
+        # ------------------------------------------------------------------
         # ORDERS
         # ------------------------------------------------------------------
         orders = []
         for idx, contact in enumerate(contacts):
             order = Order.objects.create(
                 contact=contact,
+                manager=manager,
                 status=Order.Status.NEW,
                 deadline=(now + timedelta(days=5 + idx)).date(),
                 delivery_method=Order.DeliveryMethod.NOVA_POSHTA,
@@ -204,13 +220,50 @@ class Command(BaseCommand):
 
             total = 0
             for product in products[:2]:
-                OrderItem.objects.create(
+                item = OrderItem.objects.create(
                     order=order,
                     product=product,
                     quantity=1,
                     unit_price=product.base_price,
                 )
                 total += product.base_price
+
+                execution_stage = item.production_stages.get(
+                    stage_type=ProductionStage.StageType.EXECUTION
+                )
+                execution_stage.status = ProductionStage.Status.SCHEDULED
+                execution_stage.responsible = manager
+                execution_stage.planned_start = now + timedelta(days=idx)
+                execution_stage.planned_end = now + timedelta(days=idx, hours=2)
+                execution_stage.save(
+                    update_fields=["status", "responsible", "planned_start", "planned_end", "updated_at"]
+                )
+                ProductionSlot.objects.create(
+                    order=order,
+                    stage=execution_stage,
+                    machine=laser_machine,
+                    start_datetime=execution_stage.planned_start,
+                    end_datetime=execution_stage.planned_end,
+                    comment="Demo execution slot",
+                )
+
+                painting_stage = item.production_stages.get(
+                    stage_type=ProductionStage.StageType.PAINTING
+                )
+                painting_stage.responsible = manager
+                painting_stage.planned_start = now + timedelta(days=idx, hours=3)
+                painting_stage.planned_end = now + timedelta(days=idx, hours=5)
+                painting_stage.save(
+                    update_fields=["responsible", "planned_start", "planned_end", "updated_at"]
+                )
+                ProductionSlot.objects.create(
+                    order=order,
+                    stage=painting_stage,
+                    work_unit=painting_unit,
+                    start_datetime=painting_stage.planned_start,
+                    end_datetime=painting_stage.planned_end,
+                    comment="Demo painting slot",
+                )
 
             order.payment_amount = total
             order.save()

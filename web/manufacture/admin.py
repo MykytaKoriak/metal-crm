@@ -1,11 +1,11 @@
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied
-from .models import Machine, WorkUnit, ProductionSlot
-from django.urls import path
-from django.template.response import TemplateResponse
-from django.utils.dateparse import parse_datetime
 from django.http import HttpResponseRedirect
-from django.urls import reverse
+from django.template.response import TemplateResponse
+from django.urls import path, reverse
+from django.utils.dateparse import parse_datetime
+
+from .models import Machine, ProductionSlot, ProductionStage, WorkUnit
 
 
 @admin.register(Machine)
@@ -14,16 +14,11 @@ class MachineAdmin(admin.ModelAdmin):
     list_filter = ["type"]
     search_fields = ["name", "comment"]
     fieldsets = (
-        ("Основна інформація", {
-            "fields": ("name", "type")
-        }),
-        ("Робочий день", {
-            "fields": ("workday_start", "workday_end"),
-        }),
-        ("Коментар", {
-            "fields": ("comment",),
-        }),
+        ("Основна інформація", {"fields": ("name", "type")}),
+        ("Робочий день", {"fields": ("workday_start", "workday_end")}),
+        ("Коментар", {"fields": ("comment",)}),
     )
+
 
 @admin.register(WorkUnit)
 class WorkUnitAdmin(admin.ModelAdmin):
@@ -32,13 +27,40 @@ class WorkUnitAdmin(admin.ModelAdmin):
     search_fields = ["name", "comment"]
 
 
+class StageSlotInline(admin.TabularInline):
+    model = ProductionSlot
+    extra = 0
+    fields = ("order", "machine", "work_unit", "start_datetime", "end_datetime", "comment")
+
+
+@admin.register(ProductionStage)
+class ProductionStageAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "order_display",
+        "order_item",
+        "stage_type",
+        "status",
+        "sequence",
+        "responsible",
+        "planned_start",
+        "planned_end",
+    )
+    list_filter = ("stage_type", "status", "responsible")
+    search_fields = ("order_item__order__title", "order_item__product__name", "comment")
+    inlines = [StageSlotInline]
+
+    @admin.display(description="Замовлення")
+    def order_display(self, obj):
+        return obj.order
+
+
 @admin.register(ProductionSlot)
 class ProductionSlotAdmin(admin.ModelAdmin):
-    list_display = ("order", "machine", "work_unit", "start_datetime", "end_datetime")
-    list_filter = ("machine", "work_unit")
-    search_fields = ("order__id", "order__name")  # підстав свої поля в Order
+    list_display = ("order", "stage", "machine", "work_unit", "start_datetime", "end_datetime")
+    list_filter = ("machine", "work_unit", "stage__stage_type")
+    search_fields = ("order__title", "stage__order_item__product__name", "comment")
 
-    # 1) додаємо власний URL /calendar/ до маршрутизації цієї моделі
     def get_urls(self):
         urls = super().get_urls()
         custom_urls = [
@@ -50,7 +72,6 @@ class ProductionSlotAdmin(admin.ModelAdmin):
         ]
         return custom_urls + urls
 
-    # 2) view, який рендерить шаблон з календарем
     def calendar_view(self, request):
         if not self.has_view_permission(request):
             raise PermissionDenied
@@ -62,38 +83,25 @@ class ProductionSlotAdmin(admin.ModelAdmin):
         )
         return TemplateResponse(request, "admin/productionslot_calendar.html", context)
 
-    # 3) підстановка start/end із параметрів URL у форму створення
     def get_changeform_initial_data(self, request):
         initial = super().get_changeform_initial_data(request)
         start = request.GET.get("start")
         end = request.GET.get("end")
 
         if start:
-            dt = parse_datetime(start)
-            if dt:
-                initial["start_datetime"] = dt
+            start_value = parse_datetime(start)
+            if start_value:
+                initial["start_datetime"] = start_value
 
         if end:
-            dt = parse_datetime(end)
-            if dt:
-                initial["end_datetime"] = dt
+            end_value = parse_datetime(end)
+            if end_value:
+                initial["end_datetime"] = end_value
 
         return initial
 
-
     def response_add(self, request, obj, post_url_continue=None):
-        """
-        Після створення нового ProductionSlot -> перейти на календар.
-        """
-        url = reverse("admin:manufacture_productionslot_calendar")
-        return HttpResponseRedirect(url)
+        return HttpResponseRedirect(reverse("admin:manufacture_productionslot_calendar"))
 
     def response_change(self, request, obj):
-        """
-        Після редагування також перейти на календар (опційно).
-        Якщо не хочеш — видали цей метод.
-        """
-        url = reverse("admin:manufacture_productionslot_calendar")
-        return HttpResponseRedirect(url)
-
-
+        return HttpResponseRedirect(reverse("admin:manufacture_productionslot_calendar"))

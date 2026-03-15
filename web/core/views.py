@@ -1,15 +1,48 @@
 from django.db.models import Count, Q
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from crm.models import Task
-from .access import INTERNAL_ROLES, roles_required
+
+from .access import INTERNAL_ROLES, get_user_role, roles_required
+from .dashboard import (
+    get_admin_dashboard_context,
+    get_executive_dashboard_context,
+    get_production_dashboard_context,
+    get_sales_dashboard_context,
+)
 from .models import UserProfile
+
+
+ROLE_DASHBOARD_NAMES = {
+    UserProfile.Role.ADMIN: "admin_dashboard",
+    UserProfile.Role.SALES_MANAGER: "sales_dashboard",
+    UserProfile.Role.PRODUCTION: "production_dashboard",
+    UserProfile.Role.EXECUTIVE: "executive_dashboard",
+}
+
+
+def _get_profile(user):
+    return UserProfile.objects.get_or_create(user=user)[0]
+
+
+def _dashboard_shell_context(request, active_section="dashboard"):
+    profile = _get_profile(request.user)
+    return {
+        "profile": profile,
+        "active_section": active_section,
+    }
+
+
+@roles_required(*INTERNAL_ROLES)
+def dashboard(request):
+    role = get_user_role(request.user)
+    return redirect(ROLE_DASHBOARD_NAMES.get(role, "my_account"))
 
 
 @roles_required(*INTERNAL_ROLES)
 def my_account(request):
-    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    profile = _get_profile(request.user)
     today = timezone.localdate()
 
     base_tasks = (
@@ -42,5 +75,34 @@ def my_account(request):
         "completed_tasks": completed_tasks,
         "stats": stats,
         "today": today,
+        "active_section": "account",
     }
     return render(request, "core/my_account.html", context)
+
+
+@roles_required(UserProfile.Role.ADMIN)
+def admin_dashboard(request):
+    context = _dashboard_shell_context(request)
+    context.update(get_admin_dashboard_context())
+    return render(request, "core/admin_dashboard.html", context)
+
+
+@roles_required(UserProfile.Role.SALES_MANAGER)
+def sales_dashboard(request):
+    context = _dashboard_shell_context(request)
+    context.update(get_sales_dashboard_context(request.user))
+    return render(request, "core/sales_dashboard.html", context)
+
+
+@roles_required(UserProfile.Role.PRODUCTION)
+def production_dashboard(request):
+    context = _dashboard_shell_context(request)
+    context.update(get_production_dashboard_context())
+    return render(request, "core/production_dashboard.html", context)
+
+
+@roles_required(UserProfile.Role.EXECUTIVE)
+def executive_dashboard(request):
+    context = _dashboard_shell_context(request)
+    context.update(get_executive_dashboard_context())
+    return render(request, "core/executive_dashboard.html", context)

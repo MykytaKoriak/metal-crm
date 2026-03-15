@@ -74,7 +74,7 @@ class ContactAdmin(admin.ModelAdmin):
 class ProductionSlotInline(admin.TabularInline):
     model = ProductionSlot
     extra = 0
-    fields = ["machine", "work_unit", "start_datetime", "end_datetime", "comment"]
+    fields = ["stage", "machine", "work_unit", "start_datetime", "end_datetime", "comment"]
 
 
 @admin.register(Product)
@@ -114,6 +114,7 @@ class OrderAdmin(admin.ModelAdmin):
     list_display = [
         "title_display",
         "contact",
+        "manager",
         "status",
         "deadline",
         "created_at",
@@ -134,6 +135,7 @@ class OrderAdmin(admin.ModelAdmin):
         ("Основна інформація", {
             "fields": (
                 "contact",
+                "manager",
                 "status",
                 "title",
                 ("deadline", "created_at"),
@@ -165,6 +167,11 @@ class OrderAdmin(admin.ModelAdmin):
         # Після того як інлайни (OrderItem) збережені — перераховуємо title
         obj = form.instance
         obj.refresh_title(save=True)
+
+    def save_model(self, request, obj, form, change):
+        if not obj.manager and request.user.is_authenticated:
+            obj.manager = request.user
+        super().save_model(request, obj, form, change)
 
     @admin.display(description="Назва замовлення")
     def title_display(self, obj):

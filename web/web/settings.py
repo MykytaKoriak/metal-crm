@@ -92,7 +92,7 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 LOGIN_URL = "login"
-LOGIN_REDIRECT_URL = "my_account"
+LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
 
 # Password validation

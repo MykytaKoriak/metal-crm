@@ -38,6 +38,7 @@ ADMIN_PERMISSIONS = (
     | _permission_set("crm", "task", FULL_ACCESS_ACTIONS)
     | _permission_set("manufacture", "machine", FULL_ACCESS_ACTIONS)
     | _permission_set("manufacture", "workunit", FULL_ACCESS_ACTIONS)
+    | _permission_set("manufacture", "productionstage", FULL_ACCESS_ACTIONS)
     | _permission_set("manufacture", "productionslot", FULL_ACCESS_ACTIONS)
 )
 
@@ -51,6 +52,7 @@ SALES_MANAGER_PERMISSIONS = (
     | _permission_set("crm", "product", READ_ONLY_ACTIONS)
     | _permission_set("manufacture", "machine", READ_ONLY_ACTIONS)
     | _permission_set("manufacture", "workunit", READ_ONLY_ACTIONS)
+    | _permission_set("manufacture", "productionstage", READ_ONLY_ACTIONS)
     | _permission_set("manufacture", "productionslot", READ_ONLY_ACTIONS)
 )
 
@@ -64,6 +66,7 @@ PRODUCTION_PERMISSIONS = (
     | _permission_set("crm", "task", READ_ONLY_ACTIONS)
     | _permission_set("manufacture", "machine", FULL_ACCESS_ACTIONS)
     | _permission_set("manufacture", "workunit", FULL_ACCESS_ACTIONS)
+    | _permission_set("manufacture", "productionstage", FULL_ACCESS_ACTIONS)
     | _permission_set("manufacture", "productionslot", FULL_ACCESS_ACTIONS)
 )
 
@@ -77,6 +80,7 @@ EXECUTIVE_PERMISSIONS = (
     | _permission_set("crm", "task", READ_ONLY_ACTIONS)
     | _permission_set("manufacture", "machine", READ_ONLY_ACTIONS)
     | _permission_set("manufacture", "workunit", READ_ONLY_ACTIONS)
+    | _permission_set("manufacture", "productionstage", READ_ONLY_ACTIONS)
     | _permission_set("manufacture", "productionslot", READ_ONLY_ACTIONS)
 )
 
@@ -98,7 +102,10 @@ def get_user_role(user):
 
 
 def user_has_role(user, *roles):
-    return get_user_role(user) in roles
+    role = get_user_role(user)
+    if role == UserProfile.Role.ADMIN:
+        return True
+    return role in roles
 
 
 def roles_required(*roles):

@@ -249,13 +249,15 @@ def production_slot_events(request):
         start_datetime__isnull=True
     ).exclude(
         end_datetime__isnull=True
-    ).select_related("order", "machine", "work_unit")
+    ).select_related("order", "stage", "stage__order_item", "stage__order_item__product", "machine", "work_unit")
 
     events = []
     for slot in qs:
         # Робимо адекватний заголовок для події
         location = slot.machine or slot.work_unit
         title = f"{slot.order}"
+        if slot.stage_id:
+            title = f"{slot.stage.order_item.product.name} / {slot.stage.get_stage_type_display()}"
         if location:
             title += f" – {location}"
 

@@ -252,6 +252,15 @@ class Order(models.Model):
         verbose_name="Клієнт",
     )
 
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="managed_orders",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Manager",
+    )
+
     status = models.CharField(
         "Статус",
         max_length=20,
