@@ -1,0 +1,261 @@
+{% extends "crm/workspace_base.html" %}
+
+{% block title %}{{ page_title }}{% endblock %}
+{% block eyebrow %}CRM {{ object_label|lower }}{% endblock %}
+{% block hero_title %}{{ hero_title }}{% endblock %}
+{% block hero_text %}{{ hero_text }}{% endblock %}
+
+{% block crm_extra_head %}
+    <style>
+        .form-shell {
+            display: grid;
+            gap: 18px;
+        }
+
+        .crm-form {
+            display: grid;
+            gap: 18px;
+        }
+
+        .form-grid,
+        .line-grid {
+            display: grid;
+            gap: 14px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .field-card,
+        .line-card {
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            background: var(--panel-strong);
+            padding: 14px;
+        }
+
+        .field-card.full,
+        .line-card.full {
+            grid-column: 1 / -1;
+        }
+
+        .field-card label,
+        .line-card label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: var(--muted);
+        }
+
+        .field-card input,
+        .field-card select,
+        .field-card textarea,
+        .line-card input,
+        .line-card select,
+        .line-card textarea {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 10px 12px;
+            background: #fffdf8;
+            font: inherit;
+            color: var(--ink);
+        }
+
+        .field-card textarea,
+        .line-card textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        .field-card input[type="checkbox"],
+        .line-card input[type="checkbox"] {
+            width: auto;
+            margin-right: 8px;
+        }
+
+        .field-help {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        .field-errors,
+        .form-errors {
+            margin-top: 8px;
+            color: var(--danger);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .line-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .line-header h3,
+        .line-header p {
+            margin: 0;
+        }
+
+        .checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .form-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .form-actions button,
+        .form-actions a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 16px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            text-decoration: none;
+            background: var(--panel-strong);
+            color: inherit;
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .form-actions .primary {
+            background: var(--accent);
+            color: #fff9f2;
+            border-color: var(--accent);
+        }
+
+        .form-actions .danger {
+            color: var(--danger);
+            border-color: rgba(163, 58, 49, 0.24);
+            background: rgba(163, 58, 49, 0.08);
+        }
+
+        @media (max-width: 980px) {
+            .form-grid,
+            .line-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ mode_label }}</strong>
+        <span>Mode</span>
+    </div>
+    <div class="chip">
+        <strong>{{ object_label }}</strong>
+        <span>Entity</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <form method="post" class="crm-form">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ next_url }}">
+
+            {% for hidden in form.hidden_fields %}
+                {{ hidden }}
+            {% endfor %}
+
+            {% if form.non_field_errors %}
+                <div class="form-errors">{{ form.non_field_errors }}</div>
+            {% endif %}
+
+            <div class="form-grid">
+                {% for field in form.visible_fields %}
+                    <div class="field-card{% if field.name in full_width_fields %} full{% endif %}">
+                        <label for="{{ field.id_for_label }}">
+                            {{ field.label }}
+                            {% if field.field.required %}*{% endif %}
+                        </label>
+                        {{ field }}
+                        {% if field.help_text %}
+                            <div class="field-help">{{ field.help_text }}</div>
+                        {% endif %}
+                        {% if field.errors %}
+                            <div class="field-errors">{{ field.errors }}</div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+
+            {% if formset %}
+                <section class="form-shell">
+                    <div class="line-header">
+                        <div>
+                            <span class="eyebrow">Order items</span>
+                            <h2>Позиції замовлення</h2>
+                        </div>
+                        <p class="muted">Назва замовлення оновиться автоматично після збереження.</p>
+                    </div>
+
+                    {{ formset.management_form }}
+                    {% if formset.non_form_errors %}
+                        <div class="form-errors">{{ formset.non_form_errors }}</div>
+                    {% endif %}
+
+                    {% for item_form in formset %}
+                        <div class="line-card full">
+                            <div class="line-header">
+                                <h3>Позиція {{ forloop.counter }}</h3>
+                                {% if item_form.DELETE %}
+                                    <label class="checkbox-row">{{ item_form.DELETE }} Видалити позицію</label>
+                                {% endif %}
+                            </div>
+
+                            {% for hidden in item_form.hidden_fields %}
+                                {{ hidden }}
+                            {% endfor %}
+
+                            {% if item_form.non_field_errors %}
+                                <div class="form-errors">{{ item_form.non_field_errors }}</div>
+                            {% endif %}
+
+                            <div class="line-grid">
+                                {% for field in item_form.visible_fields %}
+                                    {% if field.name != "DELETE" %}
+                                        <div class="field-card{% if field.name in item_full_width_fields %} full{% endif %}">
+                                            <label for="{{ field.id_for_label }}">
+                                                {{ field.label }}
+                                                {% if field.field.required %}*{% endif %}
+                                            </label>
+                                            {{ field }}
+                                            {% if field.help_text %}
+                                                <div class="field-help">{{ field.help_text }}</div>
+                                            {% endif %}
+                                            {% if field.errors %}
+                                                <div class="field-errors">{{ field.errors }}</div>
+                                            {% endif %}
+                                        </div>
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </section>
+            {% endif %}
+
+            <div class="form-actions">
+                <button type="submit" class="primary">{{ submit_label }}</button>
+                <a href="{{ cancel_url }}">Скасувати</a>
+                {% if delete_url %}
+                    <a href="{{ delete_url }}" class="danger">Видалити</a>
+                {% endif %}
+            </div>
+        </form>
+    </section>
+{% endblock %}

@@ -1,0 +1,92 @@
+{% extends "crm/workspace_base.html" %}
+
+{% block title %}Замовлення{% endblock %}
+{% block eyebrow %}CRM orders{% endblock %}
+{% block hero_title %}Замовлення{% endblock %}
+{% block hero_text %}Окрема CRM-сторінка замовлень у новому інтерфейсі, зі статусами, дедлайнами, сумами та власними CRUD-діями.{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ stats.total_orders }}</strong>
+        <span>Усього замовлень</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.new_orders }}</strong>
+        <span>Нові</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.in_progress_orders }}</strong>
+        <span>В роботі</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.overdue_orders }}</strong>
+        <span>Прострочені</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <div class="toolbar">
+            <form method="get" class="search-form">
+                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві, клієнту, контакту, ТТН">
+                <button type="submit">Знайти</button>
+            </form>
+            {% if order_add_url %}
+                <a href="{{ order_add_url }}">Нове замовлення</a>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="panel">
+        <span class="eyebrow">Orders</span>
+        <h2>Список замовлень</h2>
+        {% if orders %}
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>Замовлення</th>
+                    <th>Клієнт</th>
+                    <th>Менеджер</th>
+                    <th>Статус</th>
+                    <th>Дедлайн</th>
+                    <th>Сума</th>
+                    <th>Дії</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for order in orders %}
+                    <tr>
+                        <td>
+                            {% if order.edit_url %}
+                                <a href="{{ order.edit_url }}">{{ order.title|default:"Без назви" }}</a>
+                            {% else %}
+                                {{ order.title|default:"Без назви" }}
+                            {% endif %}
+                            {% if order.is_overdue %}
+                                <span class="pill overdue">прострочено</span>
+                            {% endif %}
+                        </td>
+                        <td><a href="{{ order.client_url }}">{{ order.contact.client.name }}</a></td>
+                        <td>{% if order.manager %}{{ order.manager.email|default:order.manager.username }}{% else %}—{% endif %}</td>
+                        <td>{{ order.get_status_display }}</td>
+                        <td>{{ order.deadline|date:"d.m.Y"|default:"—" }}</td>
+                        <td>{{ order.items_total|floatformat:2 }}</td>
+                        <td>
+                            <div class="link-row">
+                                {% if order.edit_url %}
+                                    <a href="{{ order.edit_url }}">Редагувати</a>
+                                {% endif %}
+                                {% if order.delete_url %}
+                                    <a href="{{ order.delete_url }}">Видалити</a>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="empty">Замовлення за цим фільтром не знайдено.</p>
+        {% endif %}
+    </section>
+{% endblock %}

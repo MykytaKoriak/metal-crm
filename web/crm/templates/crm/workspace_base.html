@@ -1,0 +1,94 @@
+{% extends "core/dashboard_base.html" %}
+
+{% block extra_head %}
+    <style>
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .toolbar a {
+            padding: 10px 14px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            text-decoration: none;
+            background: var(--panel-strong);
+        }
+
+        .search-form {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .search-form input {
+            min-width: 240px;
+            padding: 10px 12px;
+            border-radius: 14px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.8);
+            font: inherit;
+        }
+
+        .search-form button {
+            padding: 10px 14px;
+            border-radius: 14px;
+            border: 1px solid var(--line);
+            background: var(--panel-strong);
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .card-grid {
+            display: grid;
+            gap: 16px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .meta-line {
+            margin: 4px 0 0;
+            color: var(--muted);
+        }
+
+        .link-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .link-row a {
+            text-decoration: none;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            padding: 8px 12px;
+            background: var(--panel-strong);
+        }
+
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .tag {
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: rgba(143, 92, 44, 0.08);
+            font-size: 13px;
+        }
+
+        @media (max-width: 980px) {
+            .card-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+    {% block crm_extra_head %}{% endblock %}
+{% endblock %}

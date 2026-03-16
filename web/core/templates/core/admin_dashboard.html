@@ -1,0 +1,151 @@
+{% extends "core/dashboard_base.html" %}
+
+{% block title %}Адміністратор{% endblock %}
+{% block eyebrow %}Administrator dashboard{% endblock %}
+{% block hero_title %}Операційний центр адміністратора{% endblock %}
+{% block hero_text %}Контроль доступів, загальної динаміки замовлень і стану виробничих ресурсів в одному екрані.{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ user_count }}</strong>
+        <span>Користувачів</span>
+    </div>
+    <div class="chip">
+        <strong>{{ role_count }}</strong>
+        <span>Активних ролей</span>
+    </div>
+    <div class="chip">
+        <strong>{{ order_stats.total_orders }}</strong>
+        <span>Замовлень у системі</span>
+    </div>
+    <div class="chip">
+        <strong>{{ production.summary.week_load }}%</strong>
+        <span>Завантаження на тиждень</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <span class="eyebrow">Система</span>
+        <h2>Користувачі та доступи</h2>
+        <div class="metrics">
+            <div class="metric">
+                <strong>{{ user_count }}</strong>
+                <span>Усього користувачів</span>
+            </div>
+            <div class="metric">
+                <strong>{{ active_user_count }}</strong>
+                <span>Активні акаунти</span>
+            </div>
+            <div class="metric">
+                <strong>{{ role_count }}</strong>
+                <span>Налаштовані ролі</span>
+            </div>
+            <div class="metric">
+                <strong>{{ total_revenue|floatformat:2 }}</strong>
+                <span>Загальна виручка</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="section-grid two-up">
+        <article class="panel">
+            <span class="eyebrow">Orders</span>
+            <h2>Загальна статистика замовлень</h2>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>{{ order_stats.new_orders }}</strong>
+                    <span>Нові</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ order_stats.in_progress_orders }}</strong>
+                    <span>В роботі</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ order_stats.shipped_orders }}</strong>
+                    <span>Відправлені</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ order_stats.completed_orders }}</strong>
+                    <span>Завершені</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ order_stats.canceled_orders }}</strong>
+                    <span>Скасовані</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ order_stats.overdue_orders }}</strong>
+                    <span>Прострочені</span>
+                </div>
+            </div>
+        </article>
+
+        <article class="panel">
+            <span class="eyebrow">Status mix</span>
+            <h2>Розподіл по статусах</h2>
+            {% for row in order_status_rows %}
+                <div class="bar-row">
+                    <strong>{{ row.label }}</strong>
+                    <div class="bar-track">
+                        <div class="bar-fill" style="width: {{ row.bar_percent }}%"></div>
+                    </div>
+                    <span>{{ row.count }}</span>
+                </div>
+            {% endfor %}
+        </article>
+    </section>
+
+    <section class="section-grid two-up">
+        <article class="panel">
+            <span class="eyebrow">Production</span>
+            <h2>Завантаженість виробництва</h2>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>{{ production.summary.resource_count }}</strong>
+                    <span>Ресурсів</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ production.summary.today_load }}%</strong>
+                    <span>Сьогодні</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ production.summary.week_load }}%</strong>
+                    <span>На 7 днів</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ production.summary.critical_resources }}</strong>
+                    <span>Перевантажені</span>
+                </div>
+            </div>
+        </article>
+
+        <article class="panel">
+            <span class="eyebrow">Top load</span>
+            <h2>Найзавантаженіші ресурси</h2>
+            {% if production.top_resources %}
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Ресурс</th>
+                        <th>Тип</th>
+                        <th>Тиждень</th>
+                        <th>Статус</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for row in production.top_resources %}
+                        <tr>
+                            <td><a href="{% url row.detail_url_name row.id %}">{{ row.name }}</a></td>
+                            <td>{{ row.type_label }}</td>
+                            <td>{{ row.week_load }}%</td>
+                            <td><span class="pill {{ row.status }}">{{ row.status }}</span></td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="empty">Ресурси виробництва ще не заведені.</p>
+            {% endif %}
+        </article>
+    </section>
+{% endblock %}

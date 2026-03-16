@@ -1,0 +1,112 @@
+{% extends "core/dashboard_base.html" %}
+
+{% block title %}Керівник{% endblock %}
+{% block eyebrow %}Executive dashboard{% endblock %}
+{% block hero_title %}Аналітика для керівника{% endblock %}
+{% block hero_text %}Нові клієнти, замовлення, виручка і стан виробничого навантаження без доступу до технічного редагування довідників.{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ new_clients_count }}</strong>
+        <span>Нові клієнти / 30 днів</span>
+    </div>
+    <div class="chip">
+        <strong>{{ new_orders_count }}</strong>
+        <span>Нові замовлення / 30 днів</span>
+    </div>
+    <div class="chip">
+        <strong>{{ monthly_revenue|length }}</strong>
+        <span>Місяців у зрізі</span>
+    </div>
+    <div class="chip">
+        <strong>{{ production.summary.week_load }}%</strong>
+        <span>Виробництво на 7 днів</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <span class="eyebrow">Revenue</span>
+        <h2>Загальна виручка по місяцях</h2>
+        {% for row in monthly_revenue %}
+            <div class="bar-row">
+                <strong>{{ row.label }}</strong>
+                <div class="bar-track">
+                    <div class="bar-fill" style="width: {{ row.bar_percent }}%"></div>
+                </div>
+                <span>{{ row.revenue|floatformat:2 }}</span>
+            </div>
+        {% endfor %}
+    </section>
+
+    <section class="section-grid two-up">
+        <article class="panel">
+            <span class="eyebrow">Clients</span>
+            <h2>Нові клієнти</h2>
+            {% if recent_clients %}
+                <div class="mini-list">
+                    {% for client in recent_clients %}
+                        <article class="item-card">
+                            <h3>{{ client.name }}</h3>
+                            <p class="muted">{{ client.created_at|date:"d.m.Y H:i" }}</p>
+                            <p>{{ client.get_client_type_display }}</p>
+                            {% if client.email %}
+                                <p>{{ client.email }}</p>
+                            {% endif %}
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="empty">Нових клієнтів поки немає.</p>
+            {% endif %}
+        </article>
+
+        <article class="panel">
+            <span class="eyebrow">Orders</span>
+            <h2>Нові замовлення</h2>
+            {% if recent_orders %}
+                <div class="mini-list">
+                    {% for order in recent_orders %}
+                        <article class="item-card">
+                            <h3>{{ order.title|default:"Без назви" }}</h3>
+                            <p class="muted">{{ order.created_at|date:"d.m.Y H:i" }}</p>
+                            <p>{{ order.contact.full_name }}{% if order.contact.client %} / {{ order.contact.client.name }}{% endif %}</p>
+                            <p class="muted">{{ order.get_status_display }}{% if order.manager %} · {{ order.manager.email|default:order.manager.username }}{% endif %}</p>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="empty">Нових замовлень поки немає.</p>
+            {% endif %}
+        </article>
+    </section>
+
+    <section class="panel">
+        <span class="eyebrow">Production</span>
+        <h2>Завантаженість виробництва</h2>
+        {% if production.top_resources %}
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>Ресурс</th>
+                    <th>Тип</th>
+                    <th>Тиждень</th>
+                    <th>Статус</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for row in production.top_resources %}
+                    <tr>
+                        <td><a href="{% url row.detail_url_name row.id %}">{{ row.name }}</a></td>
+                        <td>{{ row.type_label }}</td>
+                        <td>{{ row.week_load }}%</td>
+                        <td><span class="pill {{ row.status }}">{{ row.status }}</span></td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="empty">Немає ресурсів для аналізу завантаження.</p>
+        {% endif %}
+    </section>
+{% endblock %}

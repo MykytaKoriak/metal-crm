@@ -1,5 +1,3 @@
-from multiprocessing.connection import Client
-
 from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
@@ -37,7 +35,7 @@ class ContactInline(admin.TabularInline):
 
 @admin.register(Client)
 class ClientAdmin(admin.ModelAdmin):
-    list_display = ("name", "client_type", "tax_code", "phones", "email", "source", "created_at")
+    list_display = ("name", "workspace_link", "client_type", "tax_code", "phones", "email", "source", "created_at")
     list_filter = ("client_type", "source", "tags")
     search_fields = ("name", "tax_code", "phones", "email")
     filter_horizontal = ("tags",)
@@ -52,6 +50,11 @@ class ClientAdmin(admin.ModelAdmin):
         ("Примітки", {"fields": ("notes",)}),
         ("Службова інформація", {"fields": ("created_at", "updated_at")}),
     )
+
+    @admin.display(description="Workspace")
+    def workspace_link(self, obj):
+        url = reverse("client_details", args=[obj.id])
+        return format_html('<a href="{}">Open</a>', url)
 
 
 @admin.register(Contact)

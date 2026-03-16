@@ -1,0 +1,141 @@
+{% extends "core/dashboard_base.html" %}
+
+{% block title %}Виробництво{% endblock %}
+{% block eyebrow %}Production dashboard{% endblock %}
+{% block hero_title %}Календар і виробнича черга{% endblock %}
+{% block hero_text %}Дашборд показує календарне навантаження ресурсів і окремий список активних виробничих етапів по позиціях замовлень.{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ production.summary.resource_count }}</strong>
+        <span>Ресурсів</span>
+    </div>
+    <div class="chip">
+        <strong>{{ production.summary.today_load }}%</strong>
+        <span>Завантаження сьогодні</span>
+    </div>
+    <div class="chip">
+        <strong>{{ production.summary.week_load }}%</strong>
+        <span>План на 7 днів</span>
+    </div>
+    <div class="chip">
+        <strong>{{ overdue_orders|length }}</strong>
+        <span>Прострочені замовлення</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <span class="eyebrow">Calendar</span>
+        <h2>Календар завантаженості верстатів</h2>
+        <p class="muted">Події беруться з production calendar і відкривають поточні детальні звіти по ресурсах.</p>
+        <div id="dashboard-calendar"></div>
+    </section>
+
+    <section class="section-grid two-up">
+        <article class="panel">
+            <span class="eyebrow">Active queue</span>
+            <h2>Активні виробничі етапи</h2>
+            {% if active_queue %}
+                <div class="mini-list">
+                    {% for stage in active_queue %}
+                        <article class="item-card">
+                            <h3>{{ stage.order_item.product.name }} · {{ stage.get_stage_type_display }}</h3>
+                            <p class="muted">{{ stage.dashboard_state }}{% if stage.dashboard_start %} · {{ stage.dashboard_start|date:"d.m.Y H:i" }}{% endif %}{% if stage.dashboard_end %} - {{ stage.dashboard_end|date:"d.m.Y H:i" }}{% endif %}</p>
+                            <p>{{ stage.dashboard_order.title|default:"Без назви" }}</p>
+                            {% if stage.dashboard_resource %}
+                                <p>{{ stage.dashboard_resource }}</p>
+                            {% endif %}
+                            <p>{{ stage.dashboard_order.contact.full_name }}{% if stage.dashboard_order.contact.client %} / {{ stage.dashboard_order.contact.client.name }}{% endif %}</p>
+                            {% if stage.responsible %}
+                                <p class="muted">Відповідальний: {{ stage.responsible.email|default:stage.responsible.username }}</p>
+                            {% endif %}
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="empty">Активних етапів зараз немає.</p>
+            {% endif %}
+        </article>
+
+        <article class="panel">
+            <span class="eyebrow">Overdue</span>
+            <h2>Прострочені замовлення</h2>
+            {% if overdue_orders %}
+                <div class="mini-list">
+                    {% for order in overdue_orders %}
+                        <article class="item-card">
+                            <h3>{{ order.title|default:"Без назви" }}</h3>
+                            <p class="muted">Дедлайн: {{ order.deadline|date:"d.m.Y" }}</p>
+                            <p>{{ order.contact.full_name }}{% if order.contact.client %} / {{ order.contact.client.name }}{% endif %}</p>
+                            <p class="muted">{{ order.get_status_display }}</p>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="empty">Прострочених замовлень немає.</p>
+            {% endif %}
+        </article>
+    </section>
+
+    <section class="panel">
+        <span class="eyebrow">Top load</span>
+        <h2>Найзавантаженіші ресурси</h2>
+        {% if production.top_resources %}
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>Ресурс</th>
+                    <th>Тип</th>
+                    <th>Доба</th>
+                    <th>Тиждень</th>
+                    <th>Статус</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for row in production.top_resources %}
+                    <tr>
+                        <td><a href="{% url row.detail_url_name row.id %}">{{ row.name }}</a></td>
+                        <td>{{ row.type_label }}</td>
+                        <td>{{ row.today_load }}%</td>
+                        <td>{{ row.week_load }}%</td>
+                        <td><span class="pill {{ row.status }}">{{ row.status }}</span></td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="empty">Ресурси виробництва ще не створені.</p>
+        {% endif %}
+    </section>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.19/index.global.min.js"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            var calendarEl = document.getElementById("dashboard-calendar");
+            if (!calendarEl) {
+                return;
+            }
+
+            var calendar = new FullCalendar.Calendar(calendarEl, {
+                initialView: "timeGridWeek",
+                locale: "uk",
+                firstDay: 1,
+                nowIndicator: true,
+                height: "auto",
+                slotMinTime: "00:00:00",
+                slotMaxTime: "24:00:00",
+                headerToolbar: {
+                    left: "prev,next today",
+                    center: "title",
+                    right: "dayGridMonth,timeGridWeek,timeGridDay"
+                },
+                events: "{% url 'production_slot_events' %}"
+            });
+
+            calendar.render();
+        });
+    </script>
+{% endblock %}

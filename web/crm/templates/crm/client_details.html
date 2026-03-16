@@ -1,0 +1,288 @@
+{% extends "crm/workspace_base.html" %}
+
+{% block title %}{{ client.name }}{% endblock %}
+{% block eyebrow %}Client workspace{% endblock %}
+{% block hero_title %}{{ client.name }}{% endblock %}
+{% block hero_text %}Окремий робочий екран клієнта з контактами, замовленнями, задачами і швидкими діями без переходу в Django Admin.{% endblock %}
+
+{% block crm_extra_head %}
+    <style>
+        .action-row,
+        .info-grid,
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .action-row {
+            margin-top: 12px;
+        }
+
+        .action-row a,
+        .action-row span {
+            padding: 10px 14px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            text-decoration: none;
+            background: var(--panel-strong);
+        }
+
+        .action-row .disabled {
+            color: var(--muted);
+            background: rgba(215, 204, 188, 0.28);
+        }
+
+        .info-grid {
+            margin-top: 14px;
+        }
+
+        .info-block {
+            min-width: 180px;
+            flex: 1 1 220px;
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            padding: 14px;
+            background: var(--panel-strong);
+        }
+
+        .tag-list {
+            margin-top: 10px;
+        }
+
+        .tag {
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: rgba(143, 92, 44, 0.08);
+            font-size: 13px;
+        }
+
+        .card-grid {
+            display: grid;
+            gap: 16px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .section-copy {
+            margin: 0 0 14px;
+            color: var(--muted);
+        }
+
+        .meta-line {
+            margin: 4px 0 0;
+            color: var(--muted);
+        }
+
+        @media (max-width: 980px) {
+            .card-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ stats.contacts_count }}</strong>
+        <span>Контактів</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.orders_count }}</strong>
+        <span>Замовлень</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.open_tasks_count }}</strong>
+        <span>Відкриті задачі</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.revenue_total|floatformat:2 }}</strong>
+        <span>Сума замовлень</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <span class="eyebrow">Client details</span>
+        <h2>Основні дані</h2>
+        <p class="section-copy">
+            Тип: {{ client.get_client_type_display }}.
+            Створено: {{ client.created_at|date:"d.m.Y H:i" }}.
+            {% if client.source %}Джерело: {{ client.get_source_display }}.{% endif %}
+        </p>
+
+        <div class="info-grid">
+            <div class="info-block">
+                <span class="eyebrow">ЄДРПОУ / РНОКПП</span>
+                <strong>{{ client.tax_code|default:"—" }}</strong>
+            </div>
+            <div class="info-block">
+                <span class="eyebrow">Телефони</span>
+                <strong>{{ client.phones|default:"—" }}</strong>
+            </div>
+            <div class="info-block">
+                <span class="eyebrow">Email</span>
+                <strong>{{ client.email|default:"—" }}</strong>
+            </div>
+            <div class="info-block">
+                <span class="eyebrow">Прострочені задачі</span>
+                <strong>{{ stats.overdue_tasks_count }}</strong>
+            </div>
+        </div>
+
+        {% if client.tags.all %}
+            <div class="tag-list">
+                {% for tag in client.tags.all %}
+                    <span class="tag">{{ tag.name }}</span>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% if client.notes %}
+            <p style="margin-top: 16px;">{{ client.notes }}</p>
+        {% endif %}
+
+        <div class="action-row">
+            {% if client_edit_url %}
+                <a href="{{ client_edit_url }}">Редагувати клієнта</a>
+            {% endif %}
+            {% if client_delete_url %}
+                <a href="{{ client_delete_url }}">Видалити клієнта</a>
+            {% endif %}
+            {% if contact_add_url %}
+                <a href="{{ contact_add_url }}">Швидко створити контакт</a>
+            {% endif %}
+            {% if order_add_url %}
+                <a href="{{ order_add_url }}">Швидко створити замовлення</a>
+            {% elif can_add_order %}
+                <span class="disabled">Для замовлення потрібен контакт</span>
+            {% endif %}
+            {% if task_add_url %}
+                <a href="{{ task_add_url }}">Швидко створити задачу</a>
+            {% elif can_add_task %}
+                <span class="disabled">Для задачі потрібен контакт</span>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="panel">
+        <span class="eyebrow">Contacts</span>
+        <h2>Список контактів</h2>
+        {% if contacts %}
+            <div class="card-grid">
+                {% for contact in contacts %}
+                    <article class="item-card">
+                        <h3>{{ contact.full_name }}</h3>
+                        {% if contact.position %}
+                            <p class="meta-line">{{ contact.position }}</p>
+                        {% endif %}
+                        <p>{{ contact.phone|default:"—" }}</p>
+                        <p>{{ contact.email|default:"—" }}</p>
+                        {% if contact.notes %}
+                            <p class="meta-line">{{ contact.notes }}</p>
+                        {% endif %}
+                        <div class="action-row">
+                            {% if contact.edit_url %}
+                                <a href="{{ contact.edit_url }}">Редагувати контакт</a>
+                            {% endif %}
+                            {% if contact.delete_url %}
+                                <a href="{{ contact.delete_url }}">Видалити контакт</a>
+                            {% endif %}
+                            {% if contact.quick_order_url %}
+                                <a href="{{ contact.quick_order_url }}">Замовлення</a>
+                            {% endif %}
+                            {% if contact.quick_task_url %}
+                                <a href="{{ contact.quick_task_url }}">Задача</a>
+                            {% endif %}
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="empty">Контактів ще немає. Почніть зі швидкого створення контакту.</p>
+        {% endif %}
+    </section>
+
+    <section class="panel">
+        <span class="eyebrow">Orders</span>
+        <h2>Список замовлень</h2>
+        {% if orders %}
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>Замовлення</th>
+                    <th>Контакт</th>
+                    <th>Менеджер</th>
+                    <th>Статус</th>
+                    <th>Дедлайн</th>
+                    <th>Сума</th>
+                    <th>Дії</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for order in orders %}
+                    <tr>
+                        <td>{% if order.edit_url %}<a href="{{ order.edit_url }}">{{ order.title|default:"Без назви" }}</a>{% else %}{{ order.title|default:"Без назви" }}{% endif %}</td>
+                        <td>{{ order.contact.full_name }}</td>
+                        <td>{% if order.manager %}{{ order.manager.email|default:order.manager.username }}{% else %}—{% endif %}</td>
+                        <td>{{ order.get_status_display }}</td>
+                        <td>{{ order.deadline|date:"d.m.Y"|default:"—" }}</td>
+                        <td>{{ order.items_total|floatformat:2 }}</td>
+                        <td>
+                            <div class="link-row">
+                                {% if order.edit_url %}
+                                    <a href="{{ order.edit_url }}">Редагувати</a>
+                                {% endif %}
+                                {% if order.delete_url %}
+                                    <a href="{{ order.delete_url }}">Видалити</a>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="empty">Замовлень по цьому клієнту ще немає.</p>
+        {% endif %}
+    </section>
+
+    <section class="panel">
+        <span class="eyebrow">Tasks</span>
+        <h2>Список задач</h2>
+        {% if tasks %}
+            <div class="mini-list">
+                {% for task in tasks %}
+                    <article class="item-card">
+                        <h3>{% if task.edit_url %}<a href="{{ task.edit_url }}">{{ task.title }}</a>{% else %}{{ task.title }}{% endif %}</h3>
+                        <p class="meta-line">
+                            {{ task.contact.full_name }} · {{ task.date|date:"d.m.Y" }}
+                            {% if task.is_overdue %}
+                                <span class="pill overdue">прострочено</span>
+                            {% elif task.status %}
+                                <span class="pill healthy">виконано</span>
+                            {% else %}
+                                <span class="pill warning">відкрита</span>
+                            {% endif %}
+                        </p>
+                        <p>Ким створено: {% if task.assigned_by %}{{ task.assigned_by.email|default:task.assigned_by.username }}{% else %}—{% endif %}</p>
+                        <p>Відповідальний: {% if task.assigned_to %}{{ task.assigned_to.email|default:task.assigned_to.username }}{% else %}—{% endif %}</p>
+                        {% if task.comment %}
+                            <p class="meta-line">{{ task.comment }}</p>
+                        {% endif %}
+                        <div class="action-row">
+                            {% if task.edit_url %}
+                                <a href="{{ task.edit_url }}">Редагувати задачу</a>
+                            {% endif %}
+                            {% if task.delete_url %}
+                                <a href="{{ task.delete_url }}">Видалити задачу</a>
+                            {% endif %}
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="empty">Задач по цьому клієнту ще немає.</p>
+        {% endif %}
+    </section>
+{% endblock %}

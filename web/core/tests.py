@@ -334,6 +334,9 @@ class TestSalesDashboard(DashboardTestMixin, TestCase):
         self.assertEqual(response.context["orders_count"], 2)
         self.assertEqual(response.context["task_stats"]["open_tasks"], 3)
         self.assertEqual(response.context["task_stats"]["overdue_tasks"], 1)
+        self.assertContains(response, "Робоче меню")
+        self.assertContains(response, "Клієнти")
+        self.assertContains(response, "Замовлення")
         self.assertContains(response, my_order.title)
         self.assertEqual(len(response.context["nearest_deadlines"]), 1)
 

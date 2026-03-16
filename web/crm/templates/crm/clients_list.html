@@ -1,0 +1,77 @@
+{% extends "crm/workspace_base.html" %}
+
+{% block title %}Клієнти{% endblock %}
+{% block eyebrow %}CRM clients{% endblock %}
+{% block hero_title %}Клієнтська база{% endblock %}
+{% block hero_text %}Власна CRM-сторінка для роботи з клієнтами, без переходу в Django Admin для навігації та дій по записах.{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ stats.total_clients }}</strong>
+        <span>Усього клієнтів</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.new_clients }}</strong>
+        <span>Нові за 30 днів</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.b2b_clients }}</strong>
+        <span>B2B клієнти</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.clients_with_open_tasks }}</strong>
+        <span>З відкритими задачами</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <div class="toolbar">
+            <form method="get" class="search-form">
+                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві, коду, телефону, email">
+                <button type="submit">Знайти</button>
+            </form>
+            {% if client_add_url %}
+                <a href="{{ client_add_url }}">Новий клієнт</a>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="panel">
+        <span class="eyebrow">Clients</span>
+        <h2>Список клієнтів</h2>
+        {% if clients %}
+            <div class="card-grid">
+                {% for client in clients %}
+                    <article class="item-card">
+                        <h3><a href="{{ client.details_url }}">{{ client.name }}</a></h3>
+                        <p class="meta-line">{{ client.get_client_type_display }}{% if client.tax_code %} · {{ client.tax_code }}{% endif %}</p>
+                        <p>{{ client.phones|default:"—" }}</p>
+                        <p>{{ client.email|default:"—" }}</p>
+                        <p class="meta-line">
+                            Контактів: {{ client.contacts_count }} · Замовлень: {{ client.orders_count }} · Відкритих задач: {{ client.open_tasks_count }}
+                        </p>
+                        {% if client.tags.all %}
+                            <div class="tag-list">
+                                {% for tag in client.tags.all %}
+                                    <span class="tag">{{ tag.name }}</span>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        <div class="link-row">
+                            <a href="{{ client.details_url }}">Відкрити картку</a>
+                            {% if client.edit_url %}
+                                <a href="{{ client.edit_url }}">Редагувати</a>
+                            {% endif %}
+                            {% if client.delete_url %}
+                                <a href="{{ client.delete_url }}">Видалити</a>
+                            {% endif %}
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="empty">Клієнтів за цим фільтром не знайдено.</p>
+        {% endif %}
+    </section>
+{% endblock %}

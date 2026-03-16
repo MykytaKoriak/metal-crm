@@ -1,0 +1,78 @@
+{% extends "crm/workspace_base.html" %}
+
+{% block title %}Задачі{% endblock %}
+{% block eyebrow %}CRM tasks{% endblock %}
+{% block hero_title %}Задачі по CRM{% endblock %}
+{% block hero_text %}Окремий список задач у стилі нового dashboard з переходом до клієнтської картки та власними CRUD-діями.{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ stats.total_tasks }}</strong>
+        <span>Усього задач</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.open_tasks }}</strong>
+        <span>Відкриті</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.completed_tasks }}</strong>
+        <span>Виконані</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.overdue_tasks }}</strong>
+        <span>Прострочені</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <div class="toolbar">
+            <form method="get" class="search-form">
+                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві, коментарю, клієнту, контакту">
+                <button type="submit">Знайти</button>
+            </form>
+            {% if task_add_url %}
+                <a href="{{ task_add_url }}">Нова задача</a>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="panel">
+        <span class="eyebrow">Tasks</span>
+        <h2>Список задач</h2>
+        {% if tasks %}
+            <div class="mini-list">
+                {% for task in tasks %}
+                    <article class="item-card">
+                        <h3>{% if task.edit_url %}<a href="{{ task.edit_url }}">{{ task.title }}</a>{% else %}{{ task.title }}{% endif %}</h3>
+                        <p class="meta-line">
+                            <a href="{{ task.client_url }}">{{ task.contact.client.name }}</a> · {{ task.contact.full_name }} · {{ task.date|date:"d.m.Y" }}
+                            {% if task.is_overdue %}
+                                <span class="pill overdue">прострочено</span>
+                            {% elif task.status %}
+                                <span class="pill healthy">виконано</span>
+                            {% else %}
+                                <span class="pill warning">відкрита</span>
+                            {% endif %}
+                        </p>
+                        <p>Ким створено: {% if task.assigned_by %}{{ task.assigned_by.email|default:task.assigned_by.username }}{% else %}—{% endif %}</p>
+                        <p>Відповідальний: {% if task.assigned_to %}{{ task.assigned_to.email|default:task.assigned_to.username }}{% else %}—{% endif %}</p>
+                        {% if task.comment %}
+                            <p class="meta-line">{{ task.comment }}</p>
+                        {% endif %}
+                        <div class="link-row">
+                            {% if task.edit_url %}
+                                <a href="{{ task.edit_url }}">Редагувати</a>
+                            {% endif %}
+                            {% if task.delete_url %}
+                                <a href="{{ task.delete_url }}">Видалити</a>
+                            {% endif %}
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="empty">Задачі за цим фільтром не знайдено.</p>
+        {% endif %}
+    </section>
+{% endblock %}

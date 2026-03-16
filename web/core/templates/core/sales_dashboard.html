@@ -1,0 +1,88 @@
+{% extends "core/dashboard_base.html" %}
+
+{% block title %}Менеджер з продажу{% endblock %}
+{% block eyebrow %}Sales dashboard{% endblock %}
+{% block hero_title %}Робочий стіл менеджера{% endblock %}
+{% block hero_text %}Фокус на особистих задачах, стані власних замовлень і найближчих дедлайнах по клієнтах.{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ task_stats.open_tasks }}</strong>
+        <span>Відкриті задачі</span>
+    </div>
+    <div class="chip">
+        <strong>{{ task_stats.overdue_tasks }}</strong>
+        <span>Прострочені</span>
+    </div>
+    <div class="chip">
+        <strong>{{ orders_count }}</strong>
+        <span>Мої замовлення</span>
+    </div>
+    <div class="chip">
+        <strong>{{ nearest_deadlines|length }}</strong>
+        <span>Найближчі дедлайни</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <span class="eyebrow">Kanban</span>
+        <h2>Мої задачі</h2>
+        <div class="kanban">
+            {% for column in task_board %}
+                <div class="kanban-column">
+                    <h3>{{ column.title }}</h3>
+                    <div class="kanban-stack">
+                        {% for task in column.items %}
+                            <article class="kanban-card">
+                                <strong>{{ task.title }}</strong>
+                                <p class="muted">{{ task.date|date:"d.m.Y" }}</p>
+                                <p>{{ task.contact.full_name }}{% if task.contact.client %} / {{ task.contact.client.name }}{% endif %}</p>
+                                {% if task.comment %}
+                                    <p class="muted">{{ task.comment }}</p>
+                                {% endif %}
+                            </article>
+                        {% empty %}
+                            <p class="empty">Порожньо.</p>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="section-grid two-up">
+        <article class="panel">
+            <span class="eyebrow">Orders</span>
+            <h2>Мої замовлення по статусах</h2>
+            {% for row in order_status_rows %}
+                <div class="bar-row">
+                    <strong>{{ row.label }}</strong>
+                    <div class="bar-track">
+                        <div class="bar-fill" style="width: {{ row.bar_percent }}%"></div>
+                    </div>
+                    <span>{{ row.count }}</span>
+                </div>
+            {% endfor %}
+        </article>
+
+        <article class="panel">
+            <span class="eyebrow">Deadlines</span>
+            <h2>Наближені дедлайни</h2>
+            {% if nearest_deadlines %}
+                <div class="mini-list">
+                    {% for order in nearest_deadlines %}
+                        <article class="item-card">
+                            <h3>{{ order.title|default:"Без назви" }}</h3>
+                            <p class="muted">Дедлайн: {{ order.deadline|date:"d.m.Y" }}</p>
+                            <p>{{ order.contact.full_name }}{% if order.contact.client %} / {{ order.contact.client.name }}{% endif %}</p>
+                            <p class="muted">{{ order.get_status_display }}</p>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="empty">На найближчі 14 днів дедлайнів не знайдено.</p>
+            {% endif %}
+        </article>
+    </section>
+{% endblock %}

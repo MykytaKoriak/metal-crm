@@ -1,0 +1,91 @@
+{% extends "crm/workspace_base.html" %}
+
+{% block title %}{{ page_title }}{% endblock %}
+{% block eyebrow %}CRM delete{% endblock %}
+{% block hero_title %}{{ hero_title }}{% endblock %}
+{% block hero_text %}{{ hero_text }}{% endblock %}
+
+{% block crm_extra_head %}
+    <style>
+        .danger-box {
+            border: 1px solid rgba(163, 58, 49, 0.18);
+            border-radius: 24px;
+            background: rgba(163, 58, 49, 0.06);
+            padding: 20px;
+        }
+
+        .danger-box h2 {
+            margin: 0 0 10px;
+        }
+
+        .danger-copy {
+            margin: 0 0 18px;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .danger-error {
+            margin: 0 0 16px;
+            color: var(--danger);
+        }
+
+        .danger-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .danger-actions button,
+        .danger-actions a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 16px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            text-decoration: none;
+            background: var(--panel-strong);
+            color: inherit;
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .danger-actions .confirm {
+            border-color: rgba(163, 58, 49, 0.28);
+            color: var(--danger);
+            background: rgba(163, 58, 49, 0.1);
+        }
+    </style>
+{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ object_label }}</strong>
+        <span>Entity</span>
+    </div>
+    <div class="chip">
+        <strong>Delete</strong>
+        <span>Action</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <div class="danger-box">
+            <span class="eyebrow">Delete confirmation</span>
+            <h2>{{ object_title }}</h2>
+            <p class="danger-copy">Ця дія незворотна. Перед видаленням перевірте, що запис більше не потрібен в CRM-процесі.</p>
+
+            {% if delete_error %}
+                <p class="danger-error">{{ delete_error }}</p>
+            {% endif %}
+
+            <form method="post" class="danger-actions">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ next_url }}">
+                <button type="submit" class="confirm">{{ confirm_label }}</button>
+                <a href="{{ cancel_url }}">Скасувати</a>
+            </form>
+        </div>
+    </section>
+{% endblock %}
