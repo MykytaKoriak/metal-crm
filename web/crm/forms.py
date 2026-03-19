@@ -78,6 +78,7 @@ class OrderForm(StyledModelForm):
         user_model = get_user_model()
         self.fields["contact"].queryset = Contact.objects.select_related("client").order_by("client__name", "full_name")
         self.fields["manager"].queryset = user_model.objects.filter(is_active=True).order_by("email", "username")
+        self.fields["manager"].required = True
 
     class Meta:
         model = Order

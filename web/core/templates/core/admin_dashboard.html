@@ -62,8 +62,12 @@
                     <span>В роботі</span>
                 </div>
                 <div class="metric">
-                    <strong>{{ order_stats.shipped_orders }}</strong>
-                    <span>Відправлені</span>
+                    <strong>{{ order_stats.in_production_orders }}</strong>
+                    <span>В виробництві</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ order_stats.ready_orders }}</strong>
+                    <span>Готові</span>
                 </div>
                 <div class="metric">
                     <strong>{{ order_stats.completed_orders }}</strong>

@@ -152,6 +152,33 @@ def _client_workspace_context(request, client, current_url=None):
     return context
 
 
+def _decorate_order(order, *, current_url, can_change_order, can_delete_order, today):
+    order.client_url = reverse("client_details", args=[order.contact.client_id])
+    order.edit_url = _build_url("crm_order_update", args=[order.id], next_url=current_url) if can_change_order else None
+    order.delete_url = _build_url("crm_order_delete", args=[order.id], next_url=current_url) if can_delete_order else None
+    order.is_overdue = bool(
+        order.deadline and order.deadline < today and order.status not in [Order.Status.COMPLETED, Order.Status.CANCELED]
+    )
+    delivery_parts = []
+    if order.delivery_method:
+        delivery_parts.append(order.get_delivery_method_display())
+    if order.recipient:
+        delivery_parts.append(order.recipient)
+    if order.recipient_phone:
+        delivery_parts.append(order.recipient_phone)
+    if order.tracking_number:
+        delivery_parts.append(f"ТТН {order.tracking_number}")
+    payment_parts = []
+    if order.payment_type:
+        payment_parts.append(order.get_payment_type_display())
+    if order.payment_terms:
+        payment_parts.append(order.payment_terms)
+    if order.payment_amount is not None:
+        payment_parts.append(f"{order.payment_amount:.2f}")
+    order.delivery_summary = " · ".join(delivery_parts)
+    order.payment_summary = " · ".join(payment_parts)
+
+
 def _render_form_page(
     request,
     *,
@@ -327,8 +354,13 @@ def client_details(request, client_id):
         ) if request.user.has_perm("crm.add_task") else None
 
     for order in orders:
-        order.edit_url = _build_url("crm_order_update", args=[order.id], next_url=current_url) if can_change_order else None
-        order.delete_url = _build_url("crm_order_delete", args=[order.id], next_url=current_url) if can_delete_order else None
+        _decorate_order(
+            order,
+            current_url=current_url,
+            can_change_order=can_change_order,
+            can_delete_order=can_delete_order,
+            today=today,
+        )
 
     for task in tasks:
         task.edit_url = _build_url("crm_task_update", args=[task.id], next_url=current_url) if can_change_task else None
@@ -415,6 +447,10 @@ def contacts_list(request):
 def orders_list(request):
     today = timezone.localdate()
     search = _search_param(request)
+    selected_manager = request.GET.get("manager", "").strip()
+    selected_status = request.GET.get("status", "").strip()
+    selected_delivery_method = request.GET.get("delivery_method", "").strip()
+    selected_payment_type = request.GET.get("payment_type", "").strip()
     queryset = _annotated_orders_queryset().order_by("-created_at", "-id")
     if search:
         queryset = queryset.filter(
@@ -422,25 +458,44 @@ def orders_list(request):
             | Q(contact__full_name__icontains=search)
             | Q(contact__client__name__icontains=search)
             | Q(tracking_number__icontains=search)
+            | Q(recipient__icontains=search)
+            | Q(recipient_phone__icontains=search)
+            | Q(payment_terms__icontains=search)
+            | Q(manager__email__icontains=search)
+            | Q(manager__username__icontains=search)
         )
+    if selected_manager == "mine":
+        queryset = queryset.filter(manager=request.user)
+    elif selected_manager.isdigit():
+        queryset = queryset.filter(manager_id=int(selected_manager))
+    elif selected_manager:
+        queryset = queryset.none()
+    if selected_status:
+        queryset = queryset.filter(status=selected_status)
+    if selected_delivery_method:
+        queryset = queryset.filter(delivery_method=selected_delivery_method)
+    if selected_payment_type:
+        queryset = queryset.filter(payment_type=selected_payment_type)
 
     current_url = request.get_full_path()
     can_change_order = request.user.has_perm("crm.change_order")
     can_delete_order = request.user.has_perm("crm.delete_order")
     orders = list(queryset[:80])
     for order in orders:
-        order.client_url = reverse("client_details", args=[order.contact.client_id])
-        order.edit_url = _build_url("crm_order_update", args=[order.id], next_url=current_url) if can_change_order else None
-        order.delete_url = _build_url("crm_order_delete", args=[order.id], next_url=current_url) if can_delete_order else None
-        order.is_overdue = bool(
-            order.deadline and order.deadline < today and order.status not in [Order.Status.COMPLETED, Order.Status.CANCELED]
+        _decorate_order(
+            order,
+            current_url=current_url,
+            can_change_order=can_change_order,
+            can_delete_order=can_delete_order,
+            today=today,
         )
 
+    filtered_queryset = queryset
     stats = {
-        "total_orders": Order.objects.count(),
-        "new_orders": Order.objects.filter(status=Order.Status.NEW).count(),
-        "in_progress_orders": Order.objects.filter(status=Order.Status.IN_PROGRESS).count(),
-        "overdue_orders": Order.objects.filter(deadline__lt=today).exclude(
+        "total_orders": filtered_queryset.count(),
+        "new_orders": filtered_queryset.filter(status=Order.Status.NEW).count(),
+        "in_progress_orders": filtered_queryset.filter(status=Order.Status.IN_PROGRESS).count(),
+        "overdue_orders": filtered_queryset.filter(deadline__lt=today).exclude(
             status__in=[Order.Status.COMPLETED, Order.Status.CANCELED]
         ).count(),
     }
@@ -451,6 +506,14 @@ def orders_list(request):
             "search": search,
             "orders": orders,
             "stats": stats,
+            "selected_manager": selected_manager,
+            "selected_status": selected_status,
+            "selected_delivery_method": selected_delivery_method,
+            "selected_payment_type": selected_payment_type,
+            "manager_options": get_user_model().objects.filter(is_active=True).order_by("email", "username"),
+            "status_choices": Order.Status.choices,
+            "delivery_choices": Order.DeliveryMethod.choices,
+            "payment_choices": Order.PaymentType.choices,
             "order_add_url": _build_url(
                 "crm_order_create",
                 params={"manager": request.user.id},

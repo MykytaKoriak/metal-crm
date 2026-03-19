@@ -157,7 +157,8 @@ def get_admin_dashboard_context():
         total_orders=Count("id"),
         new_orders=Count("id", filter=Q(status=Order.Status.NEW)),
         in_progress_orders=Count("id", filter=Q(status=Order.Status.IN_PROGRESS)),
-        shipped_orders=Count("id", filter=Q(status=Order.Status.SHIPPED)),
+        in_production_orders=Count("id", filter=Q(status=Order.Status.IN_PRODUCTION)),
+        ready_orders=Count("id", filter=Q(status=Order.Status.READY)),
         completed_orders=Count("id", filter=Q(status=Order.Status.COMPLETED)),
         canceled_orders=Count("id", filter=Q(status=Order.Status.CANCELED)),
         overdue_orders=Count(

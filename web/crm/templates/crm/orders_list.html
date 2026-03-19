@@ -3,7 +3,7 @@
 {% block title %}Замовлення{% endblock %}
 {% block eyebrow %}CRM orders{% endblock %}
 {% block hero_title %}Замовлення{% endblock %}
-{% block hero_text %}Окрема CRM-сторінка замовлень у новому інтерфейсі, зі статусами, дедлайнами, сумами та власними CRUD-діями.{% endblock %}
+{% block hero_text %}Окрема CRM-сторінка замовлень у новому інтерфейсі, зі статусами, менеджерами, доставкою, оплатою та власними CRUD-діями.{% endblock %}
 
 {% block hero_stats %}
     <div class="chip">
@@ -28,8 +28,36 @@
     <section class="panel">
         <div class="toolbar">
             <form method="get" class="search-form">
-                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві, клієнту, контакту, ТТН">
+                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві, клієнту, контакту, ТТН, отримувачу">
+                <select name="manager">
+                    <option value="">Усі менеджери</option>
+                    <option value="mine"{% if selected_manager == "mine" %} selected{% endif %}>Мої замовлення</option>
+                    {% for manager in manager_options %}
+                        <option value="{{ manager.id }}"{% if selected_manager == manager.id|stringformat:"s" %} selected{% endif %}>
+                            {{ manager.email|default:manager.username }}
+                        </option>
+                    {% endfor %}
+                </select>
+                <select name="status">
+                    <option value="">Усі статуси</option>
+                    {% for value, label in status_choices %}
+                        <option value="{{ value }}"{% if selected_status == value %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <select name="delivery_method">
+                    <option value="">Уся доставка</option>
+                    {% for value, label in delivery_choices %}
+                        <option value="{{ value }}"{% if selected_delivery_method == value %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <select name="payment_type">
+                    <option value="">Уся оплата</option>
+                    {% for value, label in payment_choices %}
+                        <option value="{{ value }}"{% if selected_payment_type == value %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
                 <button type="submit">Знайти</button>
+                <a href="{% url 'crm_orders' %}">Скинути</a>
             </form>
             {% if order_add_url %}
                 <a href="{{ order_add_url }}">Нове замовлення</a>
@@ -64,6 +92,12 @@
                             {% endif %}
                             {% if order.is_overdue %}
                                 <span class="pill overdue">прострочено</span>
+                            {% endif %}
+                            {% if order.delivery_summary %}
+                                <p class="meta-line">{{ order.delivery_summary }}</p>
+                            {% endif %}
+                            {% if order.payment_summary %}
+                                <p class="meta-line">{{ order.payment_summary }}</p>
                             {% endif %}
                         </td>
                         <td><a href="{{ order.client_url }}">{{ order.contact.client.name }}</a></td>

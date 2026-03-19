@@ -227,9 +227,10 @@ class Order(models.Model):
     class Status(models.TextChoices):
         NEW = "new", "Новий"
         IN_PROGRESS = "in_progress", "В роботі"
-        SHIPPED = "shipped", "Відправлений"
+        IN_PRODUCTION = "in_production", "В виробництві"
+        READY = "ready", "Готовий"
         COMPLETED = "completed", "Завершений"
-        CANCELED = "canceled", "Відмінений"
+        CANCELED = "canceled", "Скасований"
 
     class PaymentType(models.TextChoices):
         COD = "cod", "Післяплата"

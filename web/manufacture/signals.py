@@ -1,9 +1,10 @@
-from django.db.models.signals import post_save
+from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
 from crm.models import OrderItem
+from crm.services import sync_order_status_from_production
 
-from .models import ProductionStage
+from .models import ProductionSlot, ProductionStage
 
 
 DEFAULT_STAGE_FLOW = (
@@ -31,3 +32,24 @@ def create_default_production_stages(sender, instance, created, **kwargs):
             for sequence, stage_type in DEFAULT_STAGE_FLOW
         ]
     )
+    sync_order_status_from_production(instance.order, save=True)
+
+
+@receiver(post_save, sender=ProductionStage)
+def sync_order_status_after_stage_save(sender, instance, **kwargs):
+    sync_order_status_from_production(instance.order, save=True)
+
+
+@receiver(post_delete, sender=ProductionStage)
+def sync_order_status_after_stage_delete(sender, instance, **kwargs):
+    sync_order_status_from_production(instance.order, save=True)
+
+
+@receiver(post_save, sender=ProductionSlot)
+def sync_order_status_after_slot_save(sender, instance, **kwargs):
+    sync_order_status_from_production(instance.order, save=True)
+
+
+@receiver(post_delete, sender=ProductionSlot)
+def sync_order_status_after_slot_delete(sender, instance, **kwargs):
+    sync_order_status_from_production(instance.order, save=True)

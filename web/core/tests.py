@@ -1,6 +1,7 @@
 from datetime import timedelta
 from uuid import uuid4
 
+from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.core.management import call_command
 from django.test import TestCase
@@ -35,6 +36,11 @@ class TestEmailLogin(TestCase):
         authenticated = authenticate(username="email-login@example.com", password="secret123")
 
         self.assertEqual(authenticated, user)
+
+
+class TestProjectSettings(TestCase):
+    def test_project_uses_kyiv_timezone(self):
+        self.assertEqual(settings.TIME_ZONE, "Europe/Kyiv")
 
 
 class TestMyAccountView(TestCase):

@@ -7,6 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.models import UserProfile
+from manufacture.models import ProductionStage
 
 from .models import Client, Contact, Order, OrderItem, Product, Tag, Task
 
@@ -419,3 +420,113 @@ class TestCrmCrudViews(CrmWorkspaceMixin, TestCase):
         delete_response = self.client.post(reverse("crm_order_delete", args=[order.id]))
         self.assertRedirects(delete_response, reverse("client_details", args=[self.base_client.id]))
         self.assertFalse(Order.objects.filter(id=order.id).exists())
+
+
+class TestOrderModuleBehavior(CrmWorkspaceMixin, TestCase):
+    def setUp(self):
+        self.user = self.create_user_with_role("orders-sales@example.com", UserProfile.Role.SALES_MANAGER)
+        self.other_user = self.create_user_with_role("orders-other@example.com", UserProfile.Role.SALES_MANAGER)
+        self.client.force_login(self.user)
+        self.client_obj = Client.objects.create(name="Orders Client", phones="+380671010101")
+        self.contact = Contact.objects.create(client=self.client_obj, full_name="Orders Contact")
+
+    def test_order_title_syncs_when_items_change_outside_admin(self):
+        order = Order.objects.create(contact=self.contact, manager=self.user)
+        first_product = self.create_product(name_prefix="Laser Panel")
+        second_product = self.create_product(name_prefix="Painted Frame")
+
+        first_item = OrderItem.objects.create(order=order, product=first_product, quantity=1, unit_price="100.00")
+        order.refresh_from_db()
+        self.assertEqual(order.title, first_product.name)
+
+        second_item = OrderItem.objects.create(order=order, product=second_product, quantity=1, unit_price="150.00")
+        order.refresh_from_db()
+        self.assertEqual(order.title, f"{first_product.name}, {second_product.name}")
+
+        first_item.product = second_product
+        first_item.save()
+        order.refresh_from_db()
+        self.assertEqual(order.title, second_product.name)
+
+        second_item.delete()
+        order.refresh_from_db()
+        self.assertEqual(order.title, second_product.name)
+
+        first_item.delete()
+        order.refresh_from_db()
+        self.assertEqual(order.title, "")
+
+    def test_order_moves_to_in_production_when_stage_is_scheduled(self):
+        order = self.create_order(self.contact, manager=self.user)
+        order.status = Order.Status.IN_PROGRESS
+        order.save(update_fields=["status"])
+
+        stage = order.items.first().production_stages.get(stage_type=ProductionStage.StageType.EXECUTION)
+        stage.status = ProductionStage.Status.SCHEDULED
+        stage.planned_start = timezone.now()
+        stage.planned_end = timezone.now() + timedelta(hours=2)
+        stage.save(update_fields=["status", "planned_start", "planned_end", "updated_at"])
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.IN_PRODUCTION)
+
+    def test_order_moves_to_ready_when_all_stages_are_done(self):
+        order = self.create_order(self.contact, manager=self.user)
+        item = order.items.first()
+        finished_at = timezone.now()
+
+        for stage in item.production_stages.all():
+            stage.status = ProductionStage.Status.DONE
+            stage.started_at = finished_at - timedelta(hours=1)
+            stage.completed_at = finished_at
+            stage.save(update_fields=["status", "started_at", "completed_at", "updated_at"])
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.READY)
+
+    def test_orders_list_filters_by_manager_and_shows_delivery_and_payment_details(self):
+        visible_order = Order.objects.create(
+            contact=self.contact,
+            manager=self.user,
+            status=Order.Status.NEW,
+            deadline=timezone.localdate() + timedelta(days=2),
+            delivery_method=Order.DeliveryMethod.NOVA_POSHTA,
+            shipping_address="Kyiv, branch 4",
+            recipient="Visible Receiver",
+            recipient_phone="+380671234567",
+            tracking_number="TTN-VISIBLE",
+            payment_type=Order.PaymentType.PREPAY,
+            payment_terms="100% prepaid",
+            payment_amount="420.00",
+        )
+        other_order = Order.objects.create(
+            contact=self.contact,
+            manager=self.other_user,
+            status=Order.Status.READY,
+            deadline=timezone.localdate() + timedelta(days=5),
+            delivery_method=Order.DeliveryMethod.COURIER,
+            recipient="Other Receiver",
+            payment_type=Order.PaymentType.COD,
+            payment_amount="150.00",
+        )
+        product = self.create_product(name_prefix="Order Filter Product")
+        OrderItem.objects.create(order=visible_order, product=product, quantity=2, unit_price="210.00")
+        OrderItem.objects.create(order=other_order, product=product, quantity=1, unit_price="150.00")
+
+        response = self.client.get(
+            reverse("crm_orders"),
+            {
+                "manager": "mine",
+                "status": Order.Status.NEW,
+                "delivery_method": Order.DeliveryMethod.NOVA_POSHTA,
+                "payment_type": Order.PaymentType.PREPAY,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Visible Receiver")
+        self.assertContains(response, "TTN-VISIBLE")
+        self.assertContains(response, "100% prepaid")
+        self.assertContains(response, reverse("crm_order_update", args=[visible_order.id]))
+        self.assertNotContains(response, reverse("crm_order_update", args=[other_order.id]))
+        self.assertEqual(response.context["stats"]["total_orders"], 1)

@@ -222,7 +222,15 @@
                 <tbody>
                 {% for order in orders %}
                     <tr>
-                        <td>{% if order.edit_url %}<a href="{{ order.edit_url }}">{{ order.title|default:"Без назви" }}</a>{% else %}{{ order.title|default:"Без назви" }}{% endif %}</td>
+                        <td>
+                            {% if order.edit_url %}<a href="{{ order.edit_url }}">{{ order.title|default:"Без назви" }}</a>{% else %}{{ order.title|default:"Без назви" }}{% endif %}
+                            {% if order.delivery_summary %}
+                                <p class="meta-line">{{ order.delivery_summary }}</p>
+                            {% endif %}
+                            {% if order.payment_summary %}
+                                <p class="meta-line">{{ order.payment_summary }}</p>
+                            {% endif %}
+                        </td>
                         <td>{{ order.contact.full_name }}</td>
                         <td>{% if order.manager %}{{ order.manager.email|default:order.manager.username }}{% else %}—{% endif %}</td>
                         <td>{{ order.get_status_display }}</td>

@@ -125,8 +125,19 @@ class OrderAdmin(admin.ModelAdmin):
         "payment_type",
         "delivery_method",
     ]
-    list_filter = ["status", "payment_type", "delivery_method"]
-    search_fields = ["title", "contact__full_name", "contact__phone", "contact__email", "tracking_number"]
+    list_filter = ["status", "manager", "payment_type", "delivery_method"]
+    search_fields = [
+        "title",
+        "contact__full_name",
+        "contact__phone",
+        "contact__email",
+        "tracking_number",
+        "recipient",
+        "recipient_phone",
+        "payment_terms",
+        "manager__email",
+        "manager__username",
+    ]
     date_hierarchy = "created_at"
     ordering = ["-created_at"]
 
