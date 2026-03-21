@@ -1,20 +1,18 @@
 from datetime import datetime, time, timedelta
-from django.shortcuts import get_object_or_404, render
-from django.utils.timezone import make_aware, get_current_timezone
-from .models import Machine, WorkUnit, ProductionSlot
+
 from django.http import JsonResponse
-from django.utils.timezone import localtime
+from django.shortcuts import get_object_or_404, render
+from django.utils import timezone
+from django.utils.timezone import get_current_timezone, localtime, make_aware
 
 from core.access import INTERNAL_ROLES, roles_required
 
+from .models import Machine, ProductionSlot, ResourceDowntime, WorkUnit
+from .services import get_resource_busy_seconds, get_resource_capacity_seconds, get_resource_day_plan
 
-@roles_required(*INTERNAL_ROLES)
-def machine_load_report(request):
-    tz = get_current_timezone()
-    today = datetime.now(tz).date()
 
-    # Періоди
-    ranges = {
+def _build_ranges(today):
+    return {
         "today": (
             make_aware(datetime.combine(today, time.min)),
             make_aware(datetime.combine(today, time.max)),
@@ -29,61 +27,43 @@ def machine_load_report(request):
         ),
     }
 
-    # Загальна функція розрахунку завантаженості
-    def calc_load(resource, start, end, field_name):
-        """
-        resource — Machine або WorkUnit
-        field_name — 'machine' або 'work_unit'
-        """
-        slots = ProductionSlot.objects.filter(
-            **{field_name: resource},
-            start_datetime__lt=end,
-            end_datetime__gt=start
-        )
 
-        # визначення тривалості робочого дня
-        if hasattr(resource, "workday_start") and resource.workday_start:
-            day_start = resource.workday_start
-            day_end = resource.workday_end
-        else:
-            day_start = time(8, 0)
-            day_end = time(17, 0)
+def _calc_load(resource, start, end):
+    capacity_seconds = get_resource_capacity_seconds(resource, start, end)
+    if capacity_seconds <= 0:
+        return 0
+    busy_seconds = get_resource_busy_seconds(resource, start, end)
+    return round(busy_seconds / capacity_seconds * 100)
 
-        workday_hours = (
-                                datetime.combine(today, day_end) -
-                                datetime.combine(today, day_start)
-                        ).seconds / 3600
 
-        busy_seconds = 0
-        for slot in slots:
-            s = max(slot.start_datetime, start)
-            e = min(slot.end_datetime, end)
-            busy_seconds += max(0, (e - s).total_seconds())
+def _resource_status(resource, load_percent):
+    if not resource.is_active:
+        return "red"
+    if load_percent < 70:
+        return "green"
+    if load_percent < 90:
+        return "yellow"
+    return "red"
 
-        days = (end.date() - start.date()).days + 1
-        total_available = workday_hours * days
 
-        if total_available <= 0:
-            return 0
+@roles_required(*INTERNAL_ROLES)
+def machine_load_report(request):
+    tz = get_current_timezone()
+    today = datetime.now(tz).date()
+    ranges = _build_ranges(today)
 
-        return round((busy_seconds / 3600) / total_available * 100)
-
-    # Формуємо звіт
     machine_report = []
     for machine in Machine.objects.all():
         row = {
             "id": machine.id,
             "name": machine.name,
             "type": machine.get_type_display(),
-            "today": calc_load(machine, *ranges["today"], "machine"),
-            "three_days": calc_load(machine, *ranges["three_days"], "machine"),
-            "week": calc_load(machine, *ranges["week"], "machine"),
+            "today": _calc_load(machine, *ranges["today"]),
+            "three_days": _calc_load(machine, *ranges["three_days"]),
+            "week": _calc_load(machine, *ranges["week"]),
+            "is_active": machine.is_active,
         }
-        row["status"] = (
-            "green" if row["week"] < 70 else
-            "yellow" if row["week"] < 90 else
-            "red"
-        )
+        row["status"] = _resource_status(machine, row["week"])
         machine_report.append(row)
 
     workunit_report = []
@@ -92,168 +72,95 @@ def machine_load_report(request):
             "id": unit.id,
             "name": unit.name,
             "type": unit.get_type_display(),
-            "today": calc_load(unit, *ranges["today"], "work_unit"),
-            "three_days": calc_load(unit, *ranges["three_days"], "work_unit"),
-            "week": calc_load(unit, *ranges["week"], "work_unit"),
+            "today": _calc_load(unit, *ranges["today"]),
+            "three_days": _calc_load(unit, *ranges["three_days"]),
+            "week": _calc_load(unit, *ranges["week"]),
+            "is_active": unit.is_active,
         }
-        row["status"] = (
-            "green" if row["week"] < 70 else
-            "yellow" if row["week"] < 90 else
-            "red"
-        )
+        row["status"] = _resource_status(unit, row["week"])
         workunit_report.append(row)
 
-    return render(request, "machine_load_report.html", {
-        "machine_report": machine_report,
-        "workunit_report": workunit_report,
-    })
+    return render(
+        request,
+        "machine_load_report.html",
+        {
+            "machine_report": machine_report,
+            "workunit_report": workunit_report,
+        },
+    )
 
 
 @roles_required(*INTERNAL_ROLES)
 def machine_detail_report(request, machine_id):
     tz = get_current_timezone()
     today = datetime.now(tz).date()
-    start_period = make_aware(datetime.combine(today, time.min))
-    end_period = make_aware(datetime.combine(today + timedelta(days=7), time.max))
-
     machine = get_object_or_404(Machine, pk=machine_id)
 
-    # робочий день
-    if machine.workday_start and machine.workday_end:
-        day_start_time = machine.workday_start
-        day_end_time = machine.workday_end
-    else:
-        # дефолт 08:00–17:00, якщо не задано
-        day_start_time = time(8, 0)
-        day_end_time = time(17, 0)
-
     days = []
+    for offset in range(8):
+        day = today + timedelta(days=offset)
+        plan = get_resource_day_plan(machine, day)
+        days.append(
+            {
+                "date": day,
+                "slots": plan["busy"],
+                "blocks": plan["blocks"],
+                "free": plan["free"],
+                "work_window": plan["work_window"],
+            }
+        )
 
-    for i in range(8):  # сьогодні + 7 днів
-        day = today + timedelta(days=i)
-        day_start = make_aware(datetime.combine(day, day_start_time))
-        day_end = make_aware(datetime.combine(day, day_end_time))
-
-        # слоти для цього верстата, які хоч якось перетинають день
-        slots_qs = ProductionSlot.objects.filter(
-            machine=machine,
-            start_datetime__lt=day_end,
-            end_datetime__gt=day_start,
-        ).select_related("order")
-
-        # приводимо до відрізків всередині робочого дня
-        intervals = []
-        for slot in slots_qs:
-            s = max(slot.start_datetime, day_start)
-            e = min(slot.end_datetime, day_end)
-            if s < e:
-                intervals.append((s, e, slot))
-
-        # сортуємо по часу початку
-        intervals.sort(key=lambda x: x[0])
-
-        # шукаємо вільні проміжки
-        free_intervals = []
-        current = day_start
-        for s, e, slot in intervals:
-            if s > current:
-                free_intervals.append((current, s))
-            if e > current:
-                current = e
-        if current < day_end:
-            free_intervals.append((current, day_end))
-
-        days.append({
-            "date": day,
-            "slots": intervals,  # список (start, end, slot)
-            "free": free_intervals,  # список (start, end)
-        })
-
-    context = {
-        "machine": machine,
-        "days": days,
-    }
-    return render(request, "machine_detail_report.html", context)
+    return render(
+        request,
+        "machine_detail_report.html",
+        {
+            "machine": machine,
+            "days": days,
+        },
+    )
 
 
 @roles_required(*INTERNAL_ROLES)
 def workunit_detail_report(request, workunit_id):
     tz = get_current_timezone()
     today = datetime.now(tz).date()
-
     work_unit = get_object_or_404(WorkUnit, pk=workunit_id)
 
-    # робочий день для дільниці
-    # (якщо захочеш – можна додати workday_start/workday_end і сюди, зараз беремо дефолт 08–17)
-    day_start_time = time(8, 0)
-    day_end_time = time(17, 0)
-
     days = []
+    for offset in range(8):
+        day = today + timedelta(days=offset)
+        plan = get_resource_day_plan(work_unit, day)
+        days.append(
+            {
+                "date": day,
+                "slots": plan["busy"],
+                "blocks": plan["blocks"],
+                "free": plan["free"],
+                "work_window": plan["work_window"],
+            }
+        )
 
-    for i in range(8):  # сьогодні + 7 днів
-        day = today + timedelta(days=i)
-        day_start = make_aware(datetime.combine(day, day_start_time))
-        day_end = make_aware(datetime.combine(day, day_end_time))
-
-        # слоти для цієї дільниці, які хоч якось перетинають день
-        slots_qs = ProductionSlot.objects.filter(
-            work_unit=work_unit,
-            start_datetime__lt=day_end,
-            end_datetime__gt=day_start,
-        ).select_related("order")
-
-        # приводимо до відрізків всередині робочого дня
-        intervals = []
-        for slot in slots_qs:
-            s = max(slot.start_datetime, day_start)
-            e = min(slot.end_datetime, day_end)
-            if s < e:
-                intervals.append((s, e, slot))
-
-        # сортуємо по часу початку
-        intervals.sort(key=lambda x: x[0])
-
-        # шукаємо вільні проміжки
-        free_intervals = []
-        current = day_start
-        for s, e, slot in intervals:
-            if s > current:
-                free_intervals.append((current, s))
-            if e > current:
-                current = e
-        if current < day_end:
-            free_intervals.append((current, day_end))
-
-        days.append({
-            "date": day,
-            "slots": intervals,  # список (start, end, slot)
-            "free": free_intervals,  # список (start, end)
-        })
-
-    context = {
-        "work_unit": work_unit,
-        "days": days,
-    }
-
-    # якщо machine_detail_report рендериш як "machine_detail_report.html" без префікса,
-    # зроби тут аналогічно: "workunit_detail_report.html"
-    return render(request, "workunit_detail_report.html", context)
+    return render(
+        request,
+        "workunit_detail_report.html",
+        {
+            "work_unit": work_unit,
+            "days": days,
+        },
+    )
 
 
 @roles_required(*INTERNAL_ROLES)
 def production_slot_events(request):
-    """
-    Повертає слоти у форматі, який розуміє FullCalendar.
-    """
-    qs = ProductionSlot.objects.exclude(
-        start_datetime__isnull=True
-    ).exclude(
-        end_datetime__isnull=True
-    ).select_related("order", "stage", "stage__order_item", "stage__order_item__product", "machine", "work_unit")
+    slot_qs = (
+        ProductionSlot.objects.exclude(start_datetime__isnull=True)
+        .exclude(end_datetime__isnull=True)
+        .select_related("order", "stage", "stage__order_item", "stage__order_item__product", "machine", "work_unit")
+    )
+    downtime_qs = ResourceDowntime.objects.filter(is_blocking=True).select_related("machine", "work_unit")
 
     events = []
-    for slot in qs:
-        # Робимо адекватний заголовок для події
+    for slot in slot_qs:
         location = slot.machine or slot.work_unit
         title = f"{slot.order}"
         if slot.stage_id:
@@ -261,12 +168,29 @@ def production_slot_events(request):
         if location:
             title += f" – {location}"
 
-        events.append({
-            "id": slot.id,
-            "title": title,
-            "start": localtime(slot.start_datetime).isoformat(),
-            "end": localtime(slot.end_datetime).isoformat(),
-        })
+        events.append(
+            {
+                "id": str(slot.id),
+                "kind": "slot",
+                "title": title,
+                "start": localtime(slot.start_datetime).isoformat(),
+                "end": localtime(slot.end_datetime).isoformat(),
+            }
+        )
+
+    for downtime in downtime_qs:
+        resource = downtime.resource
+        events.append(
+            {
+                "id": f"downtime-{downtime.id}",
+                "kind": "downtime",
+                "title": f"{resource}: {downtime.get_downtime_type_display()}",
+                "start": localtime(downtime.start_datetime).isoformat(),
+                "end": localtime(downtime.end_datetime).isoformat(),
+                "backgroundColor": "#f4c7c3",
+                "borderColor": "#d92d20",
+                "textColor": "#7a271a",
+            }
+        )
 
     return JsonResponse(events, safe=False)
-

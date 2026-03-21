@@ -3,7 +3,7 @@
 {% block title %}Менеджер з продажу{% endblock %}
 {% block eyebrow %}Sales dashboard{% endblock %}
 {% block hero_title %}Робочий стіл менеджера{% endblock %}
-{% block hero_text %}Фокус на особистих задачах, стані власних замовлень і найближчих дедлайнах по клієнтах.{% endblock %}
+{% block hero_text %}Особисті задачі, замовлення та найближчі дедлайни.{% endblock %}
 
 {% block hero_stats %}
     <div class="chip">
@@ -26,8 +26,13 @@
 
 {% block content %}
     <section class="panel">
-        <span class="eyebrow">Kanban</span>
-        <h2>Мої задачі</h2>
+        <div class="panel-head">
+            <div>
+                <span class="eyebrow">Kanban</span>
+                <h2>Мої задачі</h2>
+            </div>
+            <a href="{% url 'crm_tasks_kanban' %}?assigned_to=mine" class="button-link">Відкрити повну дошку</a>
+        </div>
         <div class="kanban">
             {% for column in task_board %}
                 <div class="kanban-column">
@@ -37,7 +42,10 @@
                             <article class="kanban-card">
                                 <strong>{{ task.title }}</strong>
                                 <p class="muted">{{ task.date|date:"d.m.Y" }}</p>
-                                <p>{{ task.contact.full_name }}{% if task.contact.client %} / {{ task.contact.client.name }}{% endif %}</p>
+                                <p>{{ task.client.name }}{% if task.contact %} / {{ task.contact.full_name }}{% endif %}</p>
+                                {% if task.order_id %}
+                                    <p class="muted">{% if task.order.title %}{{ task.order.title }}{% else %}Замовлення #{{ task.order_id }}{% endif %}</p>
+                                {% endif %}
                                 {% if task.comment %}
                                     <p class="muted">{{ task.comment }}</p>
                                 {% endif %}

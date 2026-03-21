@@ -1,82 +1,157 @@
 {% extends "admin/base_site.html" %}
 
 {% block content %}
+<style>
+    .detail-shell {
+        max-width: 1320px;
+        padding: 8px 0 24px;
+    }
 
-<div class="machine-detail-report" style="display: flex; flex-direction: column">
+    .detail-meta {
+        margin: 0 0 12px;
+        color: #64737a;
+        line-height: 1.5;
+    }
+
+    .day-list {
+        display: grid;
+        gap: 8px;
+    }
+
+    .day-card {
+        padding: 12px;
+        border: 1px solid #d6dfe3;
+        border-radius: 8px;
+        background: #fff;
+    }
+
+    .day-head,
+    .slot-columns {
+        display: grid;
+        gap: 8px;
+    }
+
+    .day-head {
+        grid-template-columns: 1fr auto;
+        align-items: baseline;
+        margin-bottom: 10px;
+    }
+
+    .slot-columns {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .slot-box {
+        padding: 10px;
+        border: 1px solid #e4eaed;
+        border-radius: 6px;
+        background: #f6f7f9;
+    }
+
+    .slot-list {
+        margin: 0;
+        padding-left: 18px;
+    }
+
+    .slot-list li + li {
+        margin-top: 8px;
+    }
+
+    .muted {
+        color: #64737a;
+    }
+
+    @media (max-width: 900px) {
+        .day-head,
+        .slot-columns {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+<div class="detail-shell">
     <h1>Детальний звіт по верстату: {{ machine.name }}</h1>
-
-    <p class="text-muted">
+    <p class="detail-meta">
         Тип: {{ machine.get_type_display }}<br>
         Робочий день:
         {% if machine.workday_start and machine.workday_end %}
-        {{ machine.workday_start }} – {{ machine.workday_end }}
+            {{ machine.workday_start }} – {{ machine.workday_end }}
         {% else %}
-        08:00 – 17:00 (за замовчуванням)
+            08:00 – 17:00
         {% endif %}
     </p>
 
-    <div class="card-list" style="display: block;">
+    <div class="day-list">
         {% for day in days %}
-        <div class="card mb-3" style="margin-right: 10px;">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <strong>{{ day.date }}</strong>
-                <span class="text-muted small">
-        {% if day.slots %}
-          Слотів: {{ day.slots|length }}
-        {% else %}
-          Зайнятих слотів немає
-        {% endif %}
-      </span>
-            </div>
-
-            <div class="card-body">
-                <div class="row">
-                    <!-- Зайняті слоти -->
-                    <div class="col-md-6 mb-3 mb-md-0" style="display: flex; flex-direction: column;">
-                        <h5 class="card-title">Зайняті слоти</h5>
-                        {% if day.slots %}
-                        <ul class="list-group list-group-flush">
-                            {% for start, end, slot in day.slots %}
-                            <li class="list-group-item px-0">
-                                <div><strong>{{ start|time:"H:i" }} – {{ end|time:"H:i" }}</strong></div>
-                                <div>
-                                    Коментар:
-                                    <a href="{% url 'admin:crm_order_change' slot.order.id %}">
-                                        {{ slot.comment }}
-                                    </a>
-                                </div>
-                                <div>
-                                    Слот:
-                                    <a href="{% url 'admin:manufacture_productionslot_change' slot.id %}">
-                                        перейти до слоту
-                                    </a>
-                                </div>
-                            </li>
-                            {% endfor %}
-                        </ul>
+            <section class="day-card">
+                <div class="day-head">
+                    <h2>{{ day.date }}</h2>
+                    <span class="muted">
+                        {% if day.work_window %}
+                            {% if day.slots %}
+                                Слотів: {{ day.slots|length }}
+                            {% else %}
+                                Зайнятих слотів немає
+                            {% endif %}
                         {% else %}
-                        <p class="text-muted mb-0">Слотів немає.</p>
+                            Ресурс недоступний
                         {% endif %}
-                    </div>
-
-                    <!-- Вільні проміжки -->
-                    <div class="col-md-6" style="display: flex; flex-direction: column;">
-                        <h5 class="card-title">Вільні проміжки</h5>
-                        {% if day.free %}
-                        <ul class="list-group list-group-flush">
-                            {% for start, end in day.free %}
-                            <li class="list-group-item" style="padding: 0; padding-left: 5px !important;">
-                                {{ start|time:"H:i" }} – {{ end|time:"H:i" }}
-                            </li>
-                            {% endfor %}
-                        </ul>
-                        {% else %}
-                        <p class="text-muted mb-0">Вільних проміжків немає.</p>
-                        {% endif %}
-                    </div>
+                    </span>
                 </div>
-            </div>
-        </div>
+
+                {% if day.work_window %}
+                    <div class="slot-columns">
+                        <div class="slot-box">
+                            <h3>Зайняті слоти</h3>
+                            {% if day.slots %}
+                                <ul class="slot-list">
+                                    {% for start, end, slot in day.slots %}
+                                        <li>
+                                            <strong>{{ start|time:"H:i" }} – {{ end|time:"H:i" }}</strong><br>
+                                            Коментар:
+                                            <a href="{% url 'admin:crm_order_change' slot.order.id %}">{{ slot.comment|default:"—" }}</a><br>
+                                            <a href="{% url 'admin:manufacture_productionslot_change' slot.id %}">Перейти до слота</a>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            {% else %}
+                                <p class="muted">Слотів немає.</p>
+                            {% endif %}
+                        </div>
+
+                        <div class="slot-box">
+                            <h3>Блокування</h3>
+                            {% if day.blocks %}
+                                <ul class="slot-list">
+                                    {% for start, end, block in day.blocks %}
+                                        <li>
+                                            <strong>{{ start|time:"H:i" }} – {{ end|time:"H:i" }}</strong><br>
+                                            {{ block.get_downtime_type_display }}{% if block.comment %}: {{ block.comment }}{% endif %}
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            {% else %}
+                                <p class="muted">Блокувань немає.</p>
+                            {% endif %}
+                        </div>
+
+                        <div class="slot-box">
+                            <h3>Вільні проміжки</h3>
+                            {% if day.free %}
+                                <ul class="slot-list">
+                                    {% for start, end in day.free %}
+                                        <li>{{ start|time:"H:i" }} – {{ end|time:"H:i" }}</li>
+                                    {% endfor %}
+                                </ul>
+                            {% else %}
+                                <p class="muted">Вільних проміжків немає.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% else %}
+                    <p class="muted">На цей день ресурс вимкнений або недоступний за календарем.</p>
+                {% endif %}
+            </section>
         {% endfor %}
     </div>
 </div>

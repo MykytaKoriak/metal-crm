@@ -1,0 +1,409 @@
+{% extends "crm/workspace_base.html" %}
+
+{% block title %}Kanban задач{% endblock %}
+{% block eyebrow %}CRM kanban{% endblock %}
+{% block hero_title %}Kanban-дошка задач{% endblock %}
+{% block hero_text %}Статусна дошка задач з фільтрами та швидкою зміною статусу.{% endblock %}
+
+{% block crm_extra_head %}
+    <style>
+        .board-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .board-actions a {
+            padding: 4px 8px;
+            border-radius: 6px;
+            border: 1px solid var(--line);
+            text-decoration: none;
+            background: var(--surface-muted);
+            color: var(--ink);
+        }
+
+        .kanban-board {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .kanban-column {
+            display: grid;
+            gap: 8px;
+            align-content: start;
+            min-height: 220px;
+            transition: border-color 0.2s ease, background-color 0.2s ease;
+        }
+
+        .kanban-column.is-over {
+            border-color: var(--accent);
+            background: var(--accent-soft);
+        }
+
+        .kanban-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: baseline;
+        }
+
+        .kanban-header h3,
+        .kanban-header p {
+            margin: 0;
+        }
+
+        .kanban-stack {
+            display: grid;
+            gap: 8px;
+            min-height: 100px;
+        }
+
+        .kanban-card {
+            display: grid;
+            gap: 8px;
+            cursor: grab;
+        }
+
+        .kanban-card.is-dragging {
+            opacity: 0.55;
+            cursor: grabbing;
+        }
+
+        .kanban-card[draggable="false"] {
+            cursor: default;
+        }
+
+        .kanban-meta,
+        .kanban-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .kanban-quick-form {
+            display: grid;
+            gap: 8px;
+        }
+
+        .kanban-quick-form select,
+        .kanban-quick-form button {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 6px 8px;
+            background: var(--surface);
+            font: inherit;
+        }
+
+        .kanban-quick-form button {
+            cursor: pointer;
+            background: var(--surface-muted);
+        }
+
+        .kanban-empty {
+            border: 1px dashed var(--line-strong);
+            border-radius: 6px;
+            padding: 10px;
+            color: var(--muted);
+            background: var(--surface);
+        }
+
+        @media (max-width: 1180px) {
+            .kanban-board {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 760px) {
+            .kanban-board {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ stats.new_tasks }}</strong>
+        <span>Нові</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.in_progress_tasks }}</strong>
+        <span>В роботі</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.waiting_tasks }}</strong>
+        <span>Очікують</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.completed_tasks }}</strong>
+        <span>Виконано</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.overdue_tasks }}</strong>
+        <span>Прострочені</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <div class="toolbar">
+            <form method="get" class="search-form">
+                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по задачах, клієнтах, контактах і замовленнях">
+                <select name="assigned_to">
+                    <option value="">Усі відповідальні</option>
+                    <option value="mine"{% if selected_assigned_to == "mine" %} selected{% endif %}>Мої задачі</option>
+                    {% for user_option in assigned_to_options %}
+                        <option value="{{ user_option.id }}"{% if selected_assigned_to == user_option.id|stringformat:"s" %} selected{% endif %}>
+                            {{ user_option.email|default:user_option.username }}
+                        </option>
+                    {% endfor %}
+                </select>
+                <select name="client">
+                    <option value="">Усі клієнти</option>
+                    {% for client_option in client_options %}
+                        <option value="{{ client_option.id }}"{% if selected_client_id == client_option.id|stringformat:"s" %} selected{% endif %}>
+                            {{ client_option.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+                <select name="order">
+                    <option value="">Усі замовлення</option>
+                    {% for order_option in order_options %}
+                        <option value="{{ order_option.id }}"{% if selected_order_id == order_option.id|stringformat:"s" %} selected{% endif %}>
+                            {% if order_option.title %}{{ order_option.title }}{% else %}Замовлення #{{ order_option.id }}{% endif %}
+                        </option>
+                    {% endfor %}
+                </select>
+                <select name="deadline">
+                    {% for code, label in deadline_options %}
+                        <option value="{{ code }}"{% if selected_deadline == code %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit">Фільтрувати</button>
+                <a href="{% url 'crm_tasks_kanban' %}">Скинути</a>
+            </form>
+            <div class="board-actions">
+                <a href="{{ task_list_url }}">Список</a>
+                {% if task_add_url %}
+                    <a href="{{ task_add_url }}">Нова задача</a>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <section class="panel">
+        <span class="eyebrow">Task board</span>
+        <h2>Статусні колонки</h2>
+        <div
+            class="kanban-board"
+            data-kanban-board
+            data-current-url="{{ current_url }}"
+            data-can-change="{% if can_change_task %}true{% else %}false{% endif %}"
+        >
+            {% for column in columns %}
+                <section class="kanban-column" data-status="{{ column.code }}">
+                    <div class="kanban-header">
+                        <h3>{{ column.title }}</h3>
+                        <p class="muted" data-column-count>{{ column.count }}</p>
+                    </div>
+                    <div class="kanban-stack" data-status="{{ column.code }}">
+                        {% for task in column.items %}
+                            <article
+                                class="item-card kanban-card"
+                                data-task-id="{{ task.id }}"
+                                data-update-url="{{ task.status_update_url }}"
+                                draggable="{% if can_change_task %}true{% else %}false{% endif %}"
+                            >
+                                <div>
+                                    <strong>{% if task.edit_url %}<a href="{{ task.edit_url }}">{{ task.title }}</a>{% else %}{{ task.title }}{% endif %}</strong>
+                                </div>
+                                <div class="kanban-meta">
+                                    <span class="pill {{ task.status_tone }}" data-task-status>{{ task.get_status_display }}</span>
+                                    {% if task.is_overdue %}
+                                        <span class="pill overdue">прострочено</span>
+                                    {% endif %}
+                                    <span class="muted">{{ task.date|date:"d.m.Y" }}</span>
+                                </div>
+                                <p class="meta-line">
+                                    <a href="{{ task.client_url }}">{{ task.client.name }}</a>
+                                    {% if task.contact %}
+                                        · {{ task.contact.full_name }}
+                                    {% endif %}
+                                </p>
+                                {% if task.order_id %}
+                                    <p class="meta-line">
+                                        Замовлення:
+                                        {% if task.order_url %}
+                                            <a href="{{ task.order_url }}">{% if task.order.title %}{{ task.order.title }}{% else %}Замовлення #{{ task.order_id }}{% endif %}</a>
+                                        {% else %}
+                                            {% if task.order.title %}{{ task.order.title }}{% else %}Замовлення #{{ task.order_id }}{% endif %}
+                                        {% endif %}
+                                    </p>
+                                {% endif %}
+                                <p class="meta-line">Відповідальний: {% if task.assigned_to %}{{ task.assigned_to.email|default:task.assigned_to.username }}{% else %}—{% endif %}</p>
+                                {% if task.comment %}
+                                    <p class="meta-line">{{ task.comment }}</p>
+                                {% endif %}
+                                {% if can_change_task %}
+                                    <form method="post" action="{{ task.status_update_url }}" class="kanban-quick-form" data-status-form>
+                                        {% csrf_token %}
+                                        <input type="hidden" name="next" value="{{ current_url }}">
+                                        <select name="status" data-status-select>
+                                            {% for code, label in kanban_status_choices %}
+                                                <option value="{{ code }}"{% if task.status == code %} selected{% endif %}>{{ label }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        <button type="submit">Оновити статус</button>
+                                    </form>
+                                {% endif %}
+                                <div class="kanban-links">
+                                    {% if task.edit_url %}
+                                        <a href="{{ task.edit_url }}">Редагувати</a>
+                                    {% endif %}
+                                    {% if task.delete_url %}
+                                        <a href="{{ task.delete_url }}">Видалити</a>
+                                    {% endif %}
+                                </div>
+                            </article>
+                        {% empty %}
+                            <div class="kanban-empty">Немає задач у цій колонці.</div>
+                        {% endfor %}
+                    </div>
+                </section>
+            {% endfor %}
+        </div>
+    </section>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script>
+        (() => {
+            const board = document.querySelector("[data-kanban-board]");
+            if (!board || board.dataset.canChange !== "true") {
+                return;
+            }
+
+            const csrfField = board.querySelector('input[name="csrfmiddlewaretoken"]');
+            const csrfToken = csrfField ? csrfField.value : "";
+            const currentUrl = board.dataset.currentUrl || "";
+            let draggedCard = null;
+
+            const updateCounts = () => {
+                board.querySelectorAll(".kanban-column").forEach((column) => {
+                    const countNode = column.querySelector("[data-column-count]");
+                    if (!countNode) {
+                        return;
+                    }
+                    countNode.textContent = column.querySelectorAll(".kanban-card").length;
+                });
+            };
+
+            const updateCardStatus = (card, statusValue, statusLabel, tone) => {
+                const badge = card.querySelector("[data-task-status]");
+                if (badge) {
+                    badge.textContent = statusLabel;
+                    badge.className = `pill ${tone}`;
+                }
+                const select = card.querySelector("[data-status-select]");
+                if (select) {
+                    select.value = statusValue;
+                }
+            };
+
+            const moveCardToColumn = (card, statusValue) => {
+                const nextStack = board.querySelector(`.kanban-stack[data-status="${statusValue}"]`);
+                if (!nextStack) {
+                    return;
+                }
+                const emptyState = nextStack.querySelector(".kanban-empty");
+                if (emptyState) {
+                    emptyState.remove();
+                }
+                nextStack.appendChild(card);
+                updateCounts();
+            };
+
+            const syncStatus = async (card, statusValue) => {
+                const response = await fetch(card.dataset.updateUrl, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                        "X-CSRFToken": csrfToken,
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
+                    body: new URLSearchParams({
+                        status: statusValue,
+                        next: currentUrl,
+                    }),
+                });
+
+                if (!response.ok) {
+                    throw new Error("status update failed");
+                }
+
+                return response.json();
+            };
+
+            board.querySelectorAll(".kanban-card[draggable='true']").forEach((card) => {
+                card.addEventListener("dragstart", () => {
+                    draggedCard = card;
+                    card.classList.add("is-dragging");
+                });
+                card.addEventListener("dragend", () => {
+                    card.classList.remove("is-dragging");
+                    draggedCard = null;
+                    board.querySelectorAll(".kanban-column").forEach((column) => column.classList.remove("is-over"));
+                });
+            });
+
+            board.querySelectorAll(".kanban-column").forEach((column) => {
+                column.addEventListener("dragover", (event) => {
+                    if (!draggedCard) {
+                        return;
+                    }
+                    event.preventDefault();
+                    column.classList.add("is-over");
+                });
+                column.addEventListener("dragleave", () => {
+                    column.classList.remove("is-over");
+                });
+                column.addEventListener("drop", async (event) => {
+                    if (!draggedCard) {
+                        return;
+                    }
+                    event.preventDefault();
+                    column.classList.remove("is-over");
+
+                    const nextStatus = column.dataset.status;
+                    try {
+                        const payload = await syncStatus(draggedCard, nextStatus);
+                        moveCardToColumn(draggedCard, payload.status);
+                        updateCardStatus(draggedCard, payload.status, payload.status_label, payload.tone);
+                    } catch (error) {
+                        window.location.reload();
+                    }
+                });
+            });
+
+            board.querySelectorAll("[data-status-form]").forEach((form) => {
+                form.addEventListener("submit", async (event) => {
+                    event.preventDefault();
+                    const card = form.closest(".kanban-card");
+                    const select = form.querySelector("[data-status-select]");
+                    try {
+                        const payload = await syncStatus(card, select.value);
+                        moveCardToColumn(card, payload.status);
+                        updateCardStatus(card, payload.status, payload.status_label, payload.tone);
+                    } catch (error) {
+                        form.submit();
+                    }
+                });
+            });
+
+            updateCounts();
+        })();
+    </script>
+{% endblock %}

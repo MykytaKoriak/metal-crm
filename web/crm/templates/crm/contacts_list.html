@@ -3,7 +3,7 @@
 {% block title %}Контакти{% endblock %}
 {% block eyebrow %}CRM contacts{% endblock %}
 {% block hero_title %}Контактні особи{% endblock %}
-{% block hero_text %}Уся контактна база в окремій custom-сторінці CRM з переходом у картку клієнта та власними CRUD-діями.{% endblock %}
+{% block hero_text %}Контактна база з фільтрами та переходом у клієнта.{% endblock %}
 
 {% block hero_stats %}
     <div class="chip">
@@ -41,41 +41,43 @@
         <span class="eyebrow">Contacts</span>
         <h2>Список контактів</h2>
         {% if contacts %}
-            <table class="table">
-                <thead>
-                <tr>
-                    <th>Контакт</th>
-                    <th>Клієнт</th>
-                    <th>Посада</th>
-                    <th>Телефон</th>
-                    <th>Email</th>
-                    <th>Активність</th>
-                    <th>Дії</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for contact in contacts %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
                     <tr>
-                        <td>{% if contact.edit_url %}<a href="{{ contact.edit_url }}">{{ contact.full_name }}</a>{% else %}{{ contact.full_name }}{% endif %}</td>
-                        <td><a href="{{ contact.client_url }}">{{ contact.client.name }}</a></td>
-                        <td>{{ contact.position|default:"—" }}</td>
-                        <td>{{ contact.phone|default:"—" }}</td>
-                        <td>{{ contact.email|default:"—" }}</td>
-                        <td>Замовлень: {{ contact.orders_count }} · Задач: {{ contact.open_tasks_count }}</td>
-                        <td>
-                            <div class="link-row">
-                                {% if contact.edit_url %}
-                                    <a href="{{ contact.edit_url }}">Редагувати</a>
-                                {% endif %}
-                                {% if contact.delete_url %}
-                                    <a href="{{ contact.delete_url }}">Видалити</a>
-                                {% endif %}
-                            </div>
-                        </td>
+                        <th>Контакт</th>
+                        <th>Клієнт</th>
+                        <th>Посада</th>
+                        <th>Телефон</th>
+                        <th>Email</th>
+                        <th>Активність</th>
+                        <th>Дії</th>
                     </tr>
-                {% endfor %}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                    {% for contact in contacts %}
+                        <tr>
+                            <td>{% if contact.edit_url %}<a href="{{ contact.edit_url }}">{{ contact.full_name }}</a>{% else %}{{ contact.full_name }}{% endif %}</td>
+                            <td><a href="{{ contact.client_url }}">{{ contact.client.name }}</a></td>
+                            <td>{{ contact.position|default:"—" }}</td>
+                            <td>{{ contact.phone|default:"—" }}</td>
+                            <td>{{ contact.email|default:"—" }}</td>
+                            <td>Замовлень: {{ contact.orders_count }} · Задач: {{ contact.open_tasks_count }}</td>
+                            <td>
+                                <div class="link-row">
+                                    {% if contact.edit_url %}
+                                        <a href="{{ contact.edit_url }}">Редагувати</a>
+                                    {% endif %}
+                                    {% if contact.delete_url %}
+                                        <a href="{{ contact.delete_url }}">Видалити</a>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         {% else %}
             <p class="empty">Контакти за цим фільтром не знайдено.</p>
         {% endif %}

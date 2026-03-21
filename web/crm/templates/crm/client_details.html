@@ -3,7 +3,7 @@
 {% block title %}{{ client.name }}{% endblock %}
 {% block eyebrow %}Client workspace{% endblock %}
 {% block hero_title %}{{ client.name }}{% endblock %}
-{% block hero_text %}Окремий робочий екран клієнта з контактами, замовленнями, задачами і швидкими діями без переходу в Django Admin.{% endblock %}
+{% block hero_text %}Контакти, замовлення, задачі та дії по поточному клієнту.{% endblock %}
 
 {% block crm_extra_head %}
     <style>
@@ -12,61 +12,67 @@
         .tag-list {
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 8px;
         }
 
         .action-row {
-            margin-top: 12px;
+            margin-top: 8px;
         }
 
         .action-row a,
         .action-row span {
-            padding: 10px 14px;
-            border-radius: 999px;
+            min-height: 28px;
+            padding: 4px 8px;
+            border-radius: 6px;
             border: 1px solid var(--line);
             text-decoration: none;
-            background: var(--panel-strong);
+            background: var(--surface-muted);
+            color: var(--ink);
         }
 
         .action-row .disabled {
             color: var(--muted);
-            background: rgba(215, 204, 188, 0.28);
+            background: var(--surface-muted);
         }
 
         .info-grid {
-            margin-top: 14px;
+            margin-top: 10px;
         }
 
         .info-block {
             min-width: 180px;
             flex: 1 1 220px;
             border: 1px solid var(--line);
-            border-radius: 18px;
-            padding: 14px;
-            background: var(--panel-strong);
+            border-radius: 6px;
+            padding: 10px;
+            background: var(--surface);
         }
 
         .tag-list {
-            margin-top: 10px;
+            margin-top: 8px;
         }
 
         .tag {
-            padding: 6px 10px;
+            padding: 3px 8px;
             border-radius: 999px;
             border: 1px solid var(--line);
-            background: rgba(143, 92, 44, 0.08);
-            font-size: 13px;
+            background: var(--surface-muted);
+            font-size: 12px;
         }
 
         .card-grid {
             display: grid;
-            gap: 16px;
+            gap: 8px;
             grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
         .section-copy {
-            margin: 0 0 14px;
+            margin: 0 0 10px;
             color: var(--muted);
+        }
+
+        .section-copy.spaced {
+            margin-top: 10px;
         }
 
         .meta-line {
@@ -139,7 +145,7 @@
         {% endif %}
 
         {% if client.notes %}
-            <p style="margin-top: 16px;">{{ client.notes }}</p>
+            <p class="section-copy spaced">{{ client.notes }}</p>
         {% endif %}
 
         <div class="action-row">
@@ -159,8 +165,6 @@
             {% endif %}
             {% if task_add_url %}
                 <a href="{{ task_add_url }}">Швидко створити задачу</a>
-            {% elif can_add_task %}
-                <span class="disabled">Для задачі потрібен контакт</span>
             {% endif %}
         </div>
     </section>
@@ -207,49 +211,51 @@
         <span class="eyebrow">Orders</span>
         <h2>Список замовлень</h2>
         {% if orders %}
-            <table class="table">
-                <thead>
-                <tr>
-                    <th>Замовлення</th>
-                    <th>Контакт</th>
-                    <th>Менеджер</th>
-                    <th>Статус</th>
-                    <th>Дедлайн</th>
-                    <th>Сума</th>
-                    <th>Дії</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for order in orders %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
                     <tr>
-                        <td>
-                            {% if order.edit_url %}<a href="{{ order.edit_url }}">{{ order.title|default:"Без назви" }}</a>{% else %}{{ order.title|default:"Без назви" }}{% endif %}
-                            {% if order.delivery_summary %}
-                                <p class="meta-line">{{ order.delivery_summary }}</p>
-                            {% endif %}
-                            {% if order.payment_summary %}
-                                <p class="meta-line">{{ order.payment_summary }}</p>
-                            {% endif %}
-                        </td>
-                        <td>{{ order.contact.full_name }}</td>
-                        <td>{% if order.manager %}{{ order.manager.email|default:order.manager.username }}{% else %}—{% endif %}</td>
-                        <td>{{ order.get_status_display }}</td>
-                        <td>{{ order.deadline|date:"d.m.Y"|default:"—" }}</td>
-                        <td>{{ order.items_total|floatformat:2 }}</td>
-                        <td>
-                            <div class="link-row">
-                                {% if order.edit_url %}
-                                    <a href="{{ order.edit_url }}">Редагувати</a>
-                                {% endif %}
-                                {% if order.delete_url %}
-                                    <a href="{{ order.delete_url }}">Видалити</a>
-                                {% endif %}
-                            </div>
-                        </td>
+                        <th>Замовлення</th>
+                        <th>Контакт</th>
+                        <th>Менеджер</th>
+                        <th>Статус</th>
+                        <th>Дедлайн</th>
+                        <th>Сума</th>
+                        <th>Дії</th>
                     </tr>
-                {% endfor %}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                    {% for order in orders %}
+                        <tr>
+                            <td>
+                                {% if order.edit_url %}<a href="{{ order.edit_url }}">{{ order.title|default:"Без назви" }}</a>{% else %}{{ order.title|default:"Без назви" }}{% endif %}
+                                {% if order.delivery_summary %}
+                                    <p class="meta-line">{{ order.delivery_summary }}</p>
+                                {% endif %}
+                                {% if order.payment_summary %}
+                                    <p class="meta-line">{{ order.payment_summary }}</p>
+                                {% endif %}
+                            </td>
+                            <td>{{ order.contact.full_name }}</td>
+                            <td>{% if order.manager %}{{ order.manager.email|default:order.manager.username }}{% else %}—{% endif %}</td>
+                            <td>{{ order.get_status_display }}</td>
+                            <td>{{ order.deadline|date:"d.m.Y"|default:"—" }}</td>
+                            <td>{{ order.items_total|floatformat:2 }}</td>
+                            <td>
+                                <div class="link-row">
+                                    {% if order.edit_url %}
+                                        <a href="{{ order.edit_url }}">Редагувати</a>
+                                    {% endif %}
+                                    {% if order.delete_url %}
+                                        <a href="{{ order.delete_url }}">Видалити</a>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         {% else %}
             <p class="empty">Замовлень по цьому клієнту ще немає.</p>
         {% endif %}
@@ -264,15 +270,28 @@
                     <article class="item-card">
                         <h3>{% if task.edit_url %}<a href="{{ task.edit_url }}">{{ task.title }}</a>{% else %}{{ task.title }}{% endif %}</h3>
                         <p class="meta-line">
-                            {{ task.contact.full_name }} · {{ task.date|date:"d.m.Y" }}
+                            {{ task.date|date:"d.m.Y" }}
+                            <span class="pill {{ task.status_tone }}">{{ task.get_status_display }}</span>
                             {% if task.is_overdue %}
                                 <span class="pill overdue">прострочено</span>
-                            {% elif task.status %}
-                                <span class="pill healthy">виконано</span>
-                            {% else %}
-                                <span class="pill warning">відкрита</span>
                             {% endif %}
                         </p>
+                        <p>
+                            Клієнт: <a href="{{ task.client_url }}">{{ task.client.name }}</a>
+                            {% if task.contact %}
+                                · Контакт: {{ task.contact.full_name }}
+                            {% endif %}
+                        </p>
+                        {% if task.order_id %}
+                            <p>
+                                Замовлення:
+                                {% if task.order_url %}
+                                    <a href="{{ task.order_url }}">{% if task.order.title %}{{ task.order.title }}{% else %}Замовлення #{{ task.order_id }}{% endif %}</a>
+                                {% else %}
+                                    {% if task.order.title %}{{ task.order.title }}{% else %}Замовлення #{{ task.order_id }}{% endif %}
+                                {% endif %}
+                            </p>
+                        {% endif %}
                         <p>Ким створено: {% if task.assigned_by %}{{ task.assigned_by.email|default:task.assigned_by.username }}{% else %}—{% endif %}</p>
                         <p>Відповідальний: {% if task.assigned_to %}{{ task.assigned_to.email|default:task.assigned_to.username }}{% else %}—{% endif %}</p>
                         {% if task.comment %}

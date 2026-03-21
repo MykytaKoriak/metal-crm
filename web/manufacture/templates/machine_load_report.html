@@ -1,123 +1,158 @@
 {% extends "admin/base_site.html" %}
-{% load static %}
 
 {% block content %}
-<h1>Завантаженість виробництва</h1>
-
 <style>
-    .status-green {
-        color: #3bb54a;
-        font-weight: bold;
+    .report-shell {
+        max-width: 1320px;
+        padding: 8px 0 24px;
     }
 
-    .status-yellow {
-        color: #e6a000;
-        font-weight: bold;
+    .report-shell h1 {
+        margin-bottom: 12px;
     }
 
-    .status-red {
-        color: #d70000;
-        font-weight: bold;
+    .report-section {
+        margin-bottom: 12px;
+        padding: 12px;
+        border: 1px solid #d6dfe3;
+        border-radius: 8px;
+        background: #fff;
     }
 
-    h2 {
-        margin-top: 40px;
-        margin-bottom: 15px;
+    .table-wrap {
+        overflow-x: auto;
+    }
+
+    .report-table {
+        width: 100%;
+        min-width: 760px;
+        border-collapse: collapse;
+    }
+
+    .report-table th,
+    .report-table td {
+        padding: 8px 0;
+        border-bottom: 1px solid #e4eaed;
+        text-align: left;
+        vertical-align: top;
+        font-size: 13px;
+    }
+
+    .report-table th {
+        color: #64737a;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+    }
+
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 22px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        font-size: 11px;
+        font-weight: 600;
+    }
+
+    .status-pill.green {
+        color: #027a48;
+        background: rgba(2, 122, 72, 0.08);
+        border-color: rgba(2, 122, 72, 0.16);
+    }
+
+    .status-pill.yellow {
+        color: #b54708;
+        background: rgba(181, 71, 8, 0.08);
+        border-color: rgba(181, 71, 8, 0.16);
+    }
+
+    .status-pill.red {
+        color: #b42318;
+        background: rgba(180, 35, 24, 0.08);
+        border-color: rgba(180, 35, 24, 0.16);
     }
 </style>
 
+<div class="report-shell">
+    <h1>Завантаженість виробництва</h1>
 
-<!-- ========================= -->
-<!--   РОЗДІЛ 1 — ВЕРСТАТИ     -->
-<!-- ========================= -->
+    <section class="report-section">
+        <h2>Верстати</h2>
+        <div class="table-wrap">
+            <table class="report-table">
+                <thead>
+                <tr>
+                    <th>Назва</th>
+                    <th>Тип</th>
+                    <th>Сьогодні</th>
+                    <th>3 дні</th>
+                    <th>Тиждень</th>
+                    <th>Статус</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for row in machine_report %}
+                    <tr>
+                        <td><a href="{% url 'machine_detail_report' row.id %}">{{ row.name }}</a></td>
+                        <td>{{ row.type }}</td>
+                        <td>{{ row.today }}%</td>
+                        <td>{{ row.three_days }}%</td>
+                        <td>{{ row.week }}%</td>
+                        <td>
+                            {% if row.status == "green" %}
+                                <span class="status-pill green">Зелений</span>
+                            {% elif row.status == "yellow" %}
+                                <span class="status-pill yellow">Жовтий</span>
+                            {% else %}
+                                <span class="status-pill red">Червоний</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
 
-<h2>Верстати</h2>
-
-<table class="table table-striped">
-    <thead>
-    <tr>
-        <th>Назва</th>
-        <th>Тип</th>
-        <th>Сьогодні</th>
-        <th>3 дні</th>
-        <th>Тиждень</th>
-        <th>Статус</th>
-    </tr>
-    </thead>
-
-    <tbody>
-    {% for row in machine_report %}
-    <tr>
-        <td>
-            <a href="{% url 'machine_detail_report' row.id %}">
-                {{ row.name }}
-            </a>
-        </td>
-        <td>{{ row.type }}</td>
-
-        <td>{{ row.today }}%</td>
-        <td>{{ row.three_days }}%</td>
-        <td>{{ row.week }}%</td>
-
-        <td>
-            {% if row.status == "green" %}
-            <span class="status-green">● Зелений</span>
-            {% elif row.status == "yellow" %}
-            <span class="status-yellow">● Жовтий</span>
-            {% else %}
-            <span class="status-red">● Червоний</span>
-            {% endif %}
-        </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-</table>
-
-
-<!-- =============================== -->
-<!--   РОЗДІЛ 2 — ВИРОБНИЧІ ДІЛЬНИЦІ -->
-<!-- =============================== -->
-
-<h2>Виробничі дільниці</h2>
-
-<table class="table table-striped">
-    <thead>
-    <tr>
-        <th>Назва</th>
-        <th>Тип</th>
-        <th>Сьогодні</th>
-        <th>3 дні</th>
-        <th>Тиждень</th>
-        <th>Статус</th>
-    </tr>
-    </thead>
-
-    <tbody>
-    {% for row in workunit_report %}
-    <tr>
-        <td>
-            <a href="{% url 'workunit_detail_report' row.id %}">
-                {{ row.name }}
-            </a>
-        </td>
-        <td>{{ row.type }}</td>
-
-        <td>{{ row.today }}%</td>
-        <td>{{ row.three_days }}%</td>
-        <td>{{ row.week }}%</td>
-
-        <td>
-            {% if row.status == "green" %}
-            <span class="status-green">● Зелений</span>
-            {% elif row.status == "yellow" %}
-            <span class="status-yellow">● Жовтий</span>
-            {% else %}
-            <span class="status-red">● Червоний</span>
-            {% endif %}
-        </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-</table>
-
+    <section class="report-section">
+        <h2>Виробничі дільниці</h2>
+        <div class="table-wrap">
+            <table class="report-table">
+                <thead>
+                <tr>
+                    <th>Назва</th>
+                    <th>Тип</th>
+                    <th>Сьогодні</th>
+                    <th>3 дні</th>
+                    <th>Тиждень</th>
+                    <th>Статус</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for row in workunit_report %}
+                    <tr>
+                        <td><a href="{% url 'workunit_detail_report' row.id %}">{{ row.name }}</a></td>
+                        <td>{{ row.type }}</td>
+                        <td>{{ row.today }}%</td>
+                        <td>{{ row.three_days }}%</td>
+                        <td>{{ row.week }}%</td>
+                        <td>
+                            {% if row.status == "green" %}
+                                <span class="status-pill green">Зелений</span>
+                            {% elif row.status == "yellow" %}
+                                <span class="status-pill yellow">Жовтий</span>
+                            {% else %}
+                                <span class="status-pill red">Червоний</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
 {% endblock %}

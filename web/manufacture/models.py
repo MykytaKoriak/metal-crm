@@ -1,9 +1,74 @@
+from datetime import time
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 
 
-class Machine(models.Model):
+DEFAULT_AVAILABLE_WEEKDAYS = "0,1,2,3,4"
+DEFAULT_WORKDAY_START = time(8, 0)
+DEFAULT_WORKDAY_END = time(17, 0)
+
+
+def parse_available_weekdays(raw_value):
+    value = (raw_value or DEFAULT_AVAILABLE_WEEKDAYS).strip()
+    days = set()
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.isdigit():
+            raise ValidationError("Дні доступності мають бути числами від 0 до 6 через кому.")
+        number = int(part)
+        if number < 0 or number > 6:
+            raise ValidationError("Дні доступності мають бути в діапазоні від 0 до 6.")
+        days.add(number)
+    if not days:
+        raise ValidationError("Потрібно вказати хоча б один день доступності ресурсу.")
+    return days
+
+
+class ResourceAvailabilityMixin(models.Model):
+    is_active = models.BooleanField("Активний", default=True)
+    available_weekdays = models.CharField(
+        "Дні доступності",
+        max_length=32,
+        default=DEFAULT_AVAILABLE_WEEKDAYS,
+        help_text="Номери днів тижня через кому: 0=пн, 1=вт ... 6=нд.",
+    )
+    workday_start = models.TimeField(
+        "Початок робочого дня",
+        null=True,
+        blank=True,
+        help_text="Якщо порожньо, використовується 08:00.",
+    )
+    workday_end = models.TimeField(
+        "Кінець робочого дня",
+        null=True,
+        blank=True,
+        help_text="Якщо порожньо, використовується 17:00.",
+    )
+    comment = models.TextField("Коментар", blank=True)
+
+    class Meta:
+        abstract = True
+
+    def clean(self):
+        super().clean()
+        parse_available_weekdays(self.available_weekdays)
+        start = self.workday_start or DEFAULT_WORKDAY_START
+        end = self.workday_end or DEFAULT_WORKDAY_END
+        if end <= start:
+            raise ValidationError({"workday_end": "Кінець робочого дня має бути пізніше за початок."})
+
+    def get_available_weekdays_set(self):
+        return parse_available_weekdays(self.available_weekdays)
+
+    def get_workday_bounds(self):
+        return self.workday_start or DEFAULT_WORKDAY_START, self.workday_end or DEFAULT_WORKDAY_END
+
+
+class Machine(ResourceAvailabilityMixin, models.Model):
     class MachineType(models.TextChoices):
         LASER = "laser", "Лазер"
         BENDING = "bending", "Гибка"
@@ -19,19 +84,6 @@ class Machine(models.Model):
         default=MachineType.OTHER,
         db_index=True,
     )
-    workday_start = models.TimeField(
-        "Початок робочого дня",
-        null=True,
-        blank=True,
-        help_text="Якщо порожньо, використовується загальний графік.",
-    )
-    workday_end = models.TimeField(
-        "Кінець робочого дня",
-        null=True,
-        blank=True,
-        help_text="Якщо порожньо, використовується загальний графік.",
-    )
-    comment = models.TextField("Коментар", blank=True)
 
     class Meta:
         verbose_name = "Верстат"
@@ -45,7 +97,7 @@ class Machine(models.Model):
         return False
 
 
-class WorkUnit(models.Model):
+class WorkUnit(ResourceAvailabilityMixin, models.Model):
     class UnitType(models.TextChoices):
         WELDING = "welding_section", "Зварювальна дільниця"
         PAINTING = "painting_section", "Фарбувальна дільниця"
@@ -61,7 +113,6 @@ class WorkUnit(models.Model):
         default=UnitType.OTHER,
         db_index=True,
     )
-    comment = models.TextField("Коментар", blank=True)
 
     class Meta:
         verbose_name = "Виробнича дільниця"
@@ -148,6 +199,10 @@ class ProductionStage(models.Model):
 
 
 class ProductionSlot(models.Model):
+    class PlanningMode(models.TextChoices):
+        AUTO = "auto", "Авто"
+        MANUAL = "manual", "Ручний"
+
     order = models.ForeignKey(
         "crm.Order",
         related_name="slots",
@@ -180,6 +235,18 @@ class ProductionSlot(models.Model):
     )
     start_datetime = models.DateTimeField("Початок", null=True, blank=True)
     end_datetime = models.DateTimeField("Кінець", null=True, blank=True)
+    planning_mode = models.CharField(
+        "Режим планування",
+        max_length=12,
+        choices=PlanningMode.choices,
+        default=PlanningMode.AUTO,
+        db_index=True,
+    )
+    is_locked = models.BooleanField(
+        "Зафіксовано вручну",
+        default=False,
+        help_text="Зафіксований слот не буде пересунуто автопланувальником.",
+    )
     comment = models.CharField("Коментар", max_length=500, blank=True)
 
     class Meta:
@@ -193,14 +260,145 @@ class ProductionSlot(models.Model):
             return f"{self.stage} – {location}"
         return f"{self.order} – {location}"
 
+    @property
+    def resource(self):
+        return self.machine or self.work_unit
+
     def clean(self):
         super().clean()
-        if self.start_datetime and self.end_datetime and self.end_datetime <= self.start_datetime:
-            raise ValidationError({"end_datetime": "Кінець слота має бути пізніше за початок."})
         if self.stage_id and self.stage.order_item.order_id != self.order_id:
             raise ValidationError({"stage": "Етап має належати тому ж замовленню, що і слот."})
+        if bool(self.machine_id) == bool(self.work_unit_id):
+            raise ValidationError("Для слота потрібно вказати рівно один ресурс: верстат або дільницю.")
+        if self.start_datetime and self.end_datetime and self.end_datetime <= self.start_datetime:
+            raise ValidationError({"end_datetime": "Кінець слота має бути пізніше за початок."})
+        if self.start_datetime and self.end_datetime:
+            from .services import validate_production_slot
+
+            validate_production_slot(self)
 
     def save(self, *args, **kwargs):
         if self.stage_id and not self.order_id:
             self.order = self.stage.order_item.order
+        self.full_clean()
         super().save(*args, **kwargs)
+
+
+class ResourceDowntime(models.Model):
+    class DowntimeType(models.TextChoices):
+        MAINTENANCE = "maintenance", "Технічне обслуговування"
+        MANUAL_BLOCK = "manual_block", "Ручне блокування"
+        DOWNTIME = "downtime", "Простій"
+        HOLIDAY = "holiday", "Неробочий інтервал"
+
+    machine = models.ForeignKey(
+        Machine,
+        related_name="downtimes",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name="Верстат",
+    )
+    work_unit = models.ForeignKey(
+        WorkUnit,
+        related_name="downtimes",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name="Виробнича дільниця",
+    )
+    start_datetime = models.DateTimeField("Початок")
+    end_datetime = models.DateTimeField("Кінець")
+    downtime_type = models.CharField(
+        "Тип простою",
+        max_length=20,
+        choices=DowntimeType.choices,
+        default=DowntimeType.DOWNTIME,
+        db_index=True,
+    )
+    is_blocking = models.BooleanField("Блокує планування", default=True)
+    comment = models.CharField("Коментар", max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = "Простій ресурсу"
+        verbose_name_plural = "Простої ресурсів"
+        ordering = ["start_datetime", "id"]
+
+    def __str__(self):
+        resource = self.machine or self.work_unit
+        return f"{resource} / {self.get_downtime_type_display()} / {self.start_datetime:%d.%m.%Y %H:%M}"
+
+    @property
+    def resource(self):
+        return self.machine or self.work_unit
+
+    def clean(self):
+        super().clean()
+        if bool(self.machine_id) == bool(self.work_unit_id):
+            raise ValidationError("Для простою потрібно вказати рівно один ресурс: верстат або дільницю.")
+        if self.end_datetime <= self.start_datetime:
+            raise ValidationError({"end_datetime": "Кінець простою має бути пізніше за початок."})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class ProductionSlotChangeLog(models.Model):
+    class Action(models.TextChoices):
+        CREATED = "created", "Створено"
+        UPDATED = "updated", "Оновлено"
+        DELETED = "deleted", "Видалено"
+
+    class Source(models.TextChoices):
+        AUTO = "auto", "Автопланувальник"
+        MANUAL = "manual", "Ручне редагування"
+        SYSTEM = "system", "Система"
+
+    slot = models.ForeignKey(
+        ProductionSlot,
+        related_name="change_logs",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Слот",
+    )
+    slot_reference = models.PositiveBigIntegerField("ID слота", null=True, blank=True)
+    order = models.ForeignKey(
+        "crm.Order",
+        related_name="slot_change_logs",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Замовлення",
+    )
+    stage = models.ForeignKey(
+        ProductionStage,
+        related_name="slot_change_logs",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Етап",
+    )
+    action = models.CharField("Дія", max_length=16, choices=Action.choices, db_index=True)
+    source = models.CharField("Джерело", max_length=16, choices=Source.choices, default=Source.SYSTEM)
+    snapshot_before = models.JSONField("Було", default=dict, blank=True)
+    snapshot_after = models.JSONField("Стало", default=dict, blank=True)
+    note = models.CharField("Примітка", max_length=255, blank=True)
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="production_slot_change_logs",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Ким змінено",
+    )
+    created_at = models.DateTimeField("Створено", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Історія зміни слота"
+        verbose_name_plural = "Історія змін слотів"
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"{self.get_action_display()} / слот #{self.slot_reference or '—'}"

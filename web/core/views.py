@@ -47,20 +47,23 @@ def my_account(request):
 
     base_tasks = (
         Task.objects.filter(assigned_to=request.user)
-        .select_related("contact", "contact__client", "assigned_by", "assigned_to")
+        .select_related("client", "contact", "order", "assigned_by", "assigned_to")
         .order_by("date", "id")
     )
 
-    current_tasks = base_tasks.filter(status=False, date__gte=today)
-    overdue_tasks = base_tasks.filter(status=False, date__lt=today)
-    completed_tasks = base_tasks.filter(status=True)
+    current_tasks = base_tasks.exclude(status=Task.Status.DONE).filter(date__gte=today)
+    overdue_tasks = base_tasks.exclude(status=Task.Status.DONE).filter(date__lt=today)
+    completed_tasks = base_tasks.filter(status=Task.Status.DONE)
 
     stats = base_tasks.aggregate(
         total_tasks=Count("id"),
-        completed_tasks=Count("id", filter=Q(status=True)),
-        open_tasks=Count("id", filter=Q(status=False)),
-        overdue_tasks=Count("id", filter=Q(status=False, date__lt=today)),
-        due_today_tasks=Count("id", filter=Q(status=False, date=today)),
+        completed_tasks=Count("id", filter=Q(status=Task.Status.DONE)),
+        open_tasks=Count("id", filter=~Q(status=Task.Status.DONE)),
+        overdue_tasks=Count("id", filter=~Q(status=Task.Status.DONE) & Q(date__lt=today)),
+        due_today_tasks=Count("id", filter=~Q(status=Task.Status.DONE) & Q(date=today)),
+        new_tasks=Count("id", filter=Q(status=Task.Status.NEW)),
+        in_progress_tasks=Count("id", filter=Q(status=Task.Status.IN_PROGRESS)),
+        waiting_tasks=Count("id", filter=Q(status=Task.Status.WAITING)),
     )
     stats["tasks_created_by_me"] = Task.objects.filter(assigned_by=request.user).count()
     stats["completion_rate"] = round(

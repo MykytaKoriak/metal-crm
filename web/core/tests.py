@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from uuid import uuid4
 
 from django.conf import settings
@@ -67,28 +67,31 @@ class TestMyAccountView(TestCase):
     def test_my_account_groups_tasks_and_stats(self):
         today = timezone.localdate()
         Task.objects.create(
+            client=self.contact.client,
             contact=self.contact,
             title="Current task",
             assigned_by=self.user,
             assigned_to=self.user,
             date=today + timedelta(days=1),
-            status=False,
+            status=Task.Status.IN_PROGRESS,
         )
         Task.objects.create(
+            client=self.contact.client,
             contact=self.contact,
             title="Overdue task",
             assigned_by=self.user,
             assigned_to=self.user,
             date=today - timedelta(days=1),
-            status=False,
+            status=Task.Status.WAITING,
         )
         Task.objects.create(
+            client=self.contact.client,
             contact=self.contact,
             title="Completed task",
             assigned_by=self.user,
             assigned_to=self.user,
             date=today,
-            status=True,
+            status=Task.Status.DONE,
         )
 
         self.client.force_login(self.user)
@@ -279,36 +282,40 @@ class TestSalesDashboard(DashboardTestMixin, TestCase):
     def test_sales_dashboard_shows_my_orders_tasks_and_deadlines(self):
         today = timezone.localdate()
         Task.objects.create(
+            client=self.contact.client,
             contact=self.contact,
             title="Today task",
             assigned_by=self.user,
             assigned_to=self.user,
             date=today,
-            status=False,
+            status=Task.Status.NEW,
         )
         Task.objects.create(
+            client=self.contact.client,
             contact=self.contact,
             title="Planned task",
             assigned_by=self.user,
             assigned_to=self.user,
             date=today + timedelta(days=2),
-            status=False,
+            status=Task.Status.IN_PROGRESS,
         )
         Task.objects.create(
+            client=self.contact.client,
             contact=self.contact,
             title="Late task",
             assigned_by=self.user,
             assigned_to=self.user,
             date=today - timedelta(days=1),
-            status=False,
+            status=Task.Status.WAITING,
         )
         Task.objects.create(
+            client=self.contact.client,
             contact=self.contact,
             title="Done task",
             assigned_by=self.user,
             assigned_to=self.user,
             date=today,
-            status=True,
+            status=Task.Status.DONE,
         )
 
         my_order = self.create_order(
@@ -343,6 +350,7 @@ class TestSalesDashboard(DashboardTestMixin, TestCase):
         self.assertContains(response, "Робоче меню")
         self.assertContains(response, "Клієнти")
         self.assertContains(response, "Замовлення")
+        self.assertContains(response, reverse("crm_tasks_kanban"))
         self.assertContains(response, my_order.title)
         self.assertEqual(len(response.context["nearest_deadlines"]), 1)
 
@@ -368,20 +376,24 @@ class TestProductionDashboard(DashboardTestMixin, TestCase):
             deadline=today - timedelta(days=2),
             unit_price="700.00",
         )
-        now = timezone.now()
+        slot_date = today
+        while slot_date.weekday() > 4:
+            slot_date += timedelta(days=1)
+        slot_start = timezone.make_aware(datetime.combine(slot_date, time(10, 0)))
+        slot_end = timezone.make_aware(datetime.combine(slot_date, time(12, 0)))
         stage = active_order.items.first().production_stages.get(
             stage_type=ProductionStage.StageType.EXECUTION
         )
         stage.status = ProductionStage.Status.IN_PROGRESS
-        stage.planned_start = now - timedelta(hours=1)
-        stage.planned_end = now + timedelta(hours=2)
+        stage.planned_start = slot_start
+        stage.planned_end = slot_end
         stage.save(update_fields=["status", "planned_start", "planned_end", "updated_at"])
         ProductionSlot.objects.create(
             order=active_order,
             stage=stage,
             machine=machine,
-            start_datetime=now - timedelta(hours=1),
-            end_datetime=now + timedelta(hours=2),
+            start_datetime=slot_start,
+            end_datetime=slot_end,
         )
 
         self.client.force_login(self.user)

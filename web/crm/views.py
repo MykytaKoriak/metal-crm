@@ -8,10 +8,12 @@ from django.db import transaction
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum, Value
 from django.db.models.deletion import ProtectedError
 from django.db.models.functions import Coalesce
+from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 
 from core.access import INTERNAL_ROLES, roles_required
 from core.models import UserProfile
@@ -33,6 +35,24 @@ DEFAULT_FULL_WIDTH_FIELDS = [
     "payment_terms",
     "tags",
 ]
+TASK_STATUS_TONES = {
+    Task.Status.NEW: "warning",
+    Task.Status.IN_PROGRESS: "critical",
+    Task.Status.WAITING: "warning",
+    Task.Status.DONE: "healthy",
+}
+TASK_DEADLINE_OPTIONS = (
+    ("", "Усі дедлайни"),
+    ("overdue", "Прострочені"),
+    ("today", "На сьогодні"),
+    ("next_7_days", "Наступні 7 днів"),
+)
+TASK_KANBAN_COLUMNS = (
+    (Task.Status.NEW, "Нові"),
+    (Task.Status.IN_PROGRESS, "В роботі"),
+    (Task.Status.WAITING, "Очікують"),
+    (Task.Status.DONE, "Виконано"),
+)
 
 
 def _crm_context(request, crm_nav):
@@ -138,15 +158,18 @@ def _client_workspace_context(request, client, current_url=None):
             params={"contact": primary_contact.id, "manager": request.user.id},
             next_url=current_url,
         )
-    if primary_contact and can_add_task:
+    if can_add_task:
+        task_params = {
+            "client": client.id,
+            "assigned_by": request.user.id,
+            "assigned_to": request.user.id,
+            "date": timezone.localdate().isoformat(),
+        }
+        if primary_contact:
+            task_params["contact"] = primary_contact.id
         context["task_add_url"] = _build_url(
             "crm_task_create",
-            params={
-                "contact": primary_contact.id,
-                "assigned_by": request.user.id,
-                "assigned_to": request.user.id,
-                "date": timezone.localdate().isoformat(),
-            },
+            params=task_params,
             next_url=current_url,
         )
     return context
@@ -177,6 +200,155 @@ def _decorate_order(order, *, current_url, can_change_order, can_delete_order, t
         payment_parts.append(f"{order.payment_amount:.2f}")
     order.delivery_summary = " · ".join(delivery_parts)
     order.payment_summary = " · ".join(payment_parts)
+
+
+def _tasks_base_queryset():
+    return Task.objects.select_related(
+        "client",
+        "contact",
+        "order",
+        "assigned_to",
+        "assigned_by",
+    ).order_by("date", "id")
+
+
+def _task_filter_values(request):
+    return {
+        "search": _search_param(request),
+        "assigned_to": request.GET.get("assigned_to", "").strip(),
+        "client_id": request.GET.get("client", "").strip(),
+        "order_id": request.GET.get("order", "").strip(),
+        "status": request.GET.get("status", "").strip(),
+        "deadline": request.GET.get("deadline", "").strip(),
+    }
+
+
+def _apply_task_filters(queryset, *, request, filter_values, today, include_status=True):
+    search = filter_values["search"]
+    selected_assigned_to = filter_values["assigned_to"]
+    selected_client_id = filter_values["client_id"]
+    selected_order_id = filter_values["order_id"]
+    selected_status = filter_values["status"]
+    selected_deadline = filter_values["deadline"]
+
+    if search:
+        queryset = queryset.filter(
+            Q(title__icontains=search)
+            | Q(comment__icontains=search)
+            | Q(client__name__icontains=search)
+            | Q(contact__full_name__icontains=search)
+            | Q(order__title__icontains=search)
+        )
+
+    if selected_assigned_to == "mine":
+        queryset = queryset.filter(assigned_to=request.user)
+    elif selected_assigned_to.isdigit():
+        queryset = queryset.filter(assigned_to_id=int(selected_assigned_to))
+    elif selected_assigned_to:
+        queryset = queryset.none()
+
+    if selected_client_id.isdigit():
+        queryset = queryset.filter(client_id=int(selected_client_id))
+    elif selected_client_id:
+        queryset = queryset.none()
+
+    if selected_order_id.isdigit():
+        queryset = queryset.filter(order_id=int(selected_order_id))
+    elif selected_order_id:
+        queryset = queryset.none()
+
+    if include_status and selected_status:
+        queryset = queryset.filter(status=selected_status)
+
+    if selected_deadline == "overdue":
+        queryset = queryset.filter(date__lt=today).exclude(status=Task.Status.DONE)
+    elif selected_deadline == "today":
+        queryset = queryset.filter(date=today)
+    elif selected_deadline == "next_7_days":
+        queryset = queryset.filter(date__gt=today, date__lte=today + timedelta(days=7)).exclude(status=Task.Status.DONE)
+
+    return queryset
+
+
+def _decorate_task(task, *, current_url, can_change_task, can_delete_task, can_change_order, today):
+    task.client_url = reverse("client_details", args=[task.client_id])
+    task.edit_url = _build_url("crm_task_update", args=[task.id], next_url=current_url) if can_change_task else None
+    task.delete_url = _build_url("crm_task_delete", args=[task.id], next_url=current_url) if can_delete_task else None
+    task.order_url = (
+        _build_url("crm_order_update", args=[task.order_id], next_url=current_url)
+        if task.order_id and can_change_order
+        else None
+    )
+    task.is_overdue = task.status != Task.Status.DONE and task.date < today
+    task.status_tone = TASK_STATUS_TONES.get(task.status, "warning")
+
+
+def _task_stats(queryset, today):
+    return {
+        "total_tasks": queryset.count(),
+        "new_tasks": queryset.filter(status=Task.Status.NEW).count(),
+        "in_progress_tasks": queryset.filter(status=Task.Status.IN_PROGRESS).count(),
+        "waiting_tasks": queryset.filter(status=Task.Status.WAITING).count(),
+        "completed_tasks": queryset.filter(status=Task.Status.DONE).count(),
+        "open_tasks": queryset.exclude(status=Task.Status.DONE).count(),
+        "overdue_tasks": queryset.filter(date__lt=today).exclude(status=Task.Status.DONE).count(),
+    }
+
+
+def _task_filter_context(*, request, current_url, filter_values):
+    selected_client_id = filter_values["client_id"]
+    order_options = Order.objects.select_related("contact", "contact__client").order_by("-created_at", "-id")
+    if selected_client_id.isdigit():
+        order_options = order_options.filter(contact__client_id=int(selected_client_id))
+    else:
+        order_options = order_options[:100]
+
+    return {
+        "selected_assigned_to": filter_values["assigned_to"],
+        "selected_client_id": selected_client_id,
+        "selected_order_id": filter_values["order_id"],
+        "selected_status": filter_values["status"],
+        "selected_deadline": filter_values["deadline"],
+        "assigned_to_options": get_user_model().objects.filter(is_active=True).order_by("email", "username"),
+        "client_options": Client.objects.order_by("name"),
+        "order_options": order_options,
+        "task_status_choices": Task.Status.choices,
+        "deadline_options": TASK_DEADLINE_OPTIONS,
+        "task_add_url": _build_url(
+            "crm_task_create",
+            params={
+                "assigned_by": request.user.id,
+                "assigned_to": request.user.id,
+                "date": timezone.localdate().isoformat(),
+                "client": selected_client_id or None,
+                "order": filter_values["order_id"] or None,
+            },
+            next_url=current_url,
+        )
+        if request.user.has_perm("crm.add_task")
+        else None,
+        "task_kanban_url": _build_url(
+            "crm_tasks_kanban",
+            params={
+                "q": filter_values["search"] or None,
+                "assigned_to": filter_values["assigned_to"] or None,
+                "client": selected_client_id or None,
+                "order": filter_values["order_id"] or None,
+                "deadline": filter_values["deadline"] or None,
+            },
+        ),
+        "task_list_url": _build_url(
+            "crm_tasks",
+            params={
+                "q": filter_values["search"] or None,
+                "assigned_to": filter_values["assigned_to"] or None,
+                "client": selected_client_id or None,
+                "order": filter_values["order_id"] or None,
+                "status": filter_values["status"] or None,
+                "deadline": filter_values["deadline"] or None,
+            },
+        ),
+    }
 
 
 def _render_form_page(
@@ -261,8 +433,8 @@ def clients_list(request):
             contacts_count=Count("contacts", distinct=True),
             orders_count=Count("contacts__orders", distinct=True),
             open_tasks_count=Count(
-                "contacts__tasks",
-                filter=Q(contacts__tasks__status=False),
+                "tasks",
+                filter=Q(tasks__status__in=Task.OPEN_STATUSES),
                 distinct=True,
             ),
         )
@@ -289,7 +461,7 @@ def clients_list(request):
         "total_clients": Client.objects.count(),
         "new_clients": Client.objects.filter(created_at__date__gte=today - timedelta(days=30)).count(),
         "b2b_clients": Client.objects.filter(client_type__in=[Client.ClientType.FOP, Client.ClientType.TOV]).count(),
-        "clients_with_open_tasks": Client.objects.filter(contacts__tasks__status=False).distinct().count(),
+        "clients_with_open_tasks": Client.objects.filter(tasks__status__in=Task.OPEN_STATUSES).distinct().count(),
     }
 
     context = _crm_context(request, "clients")
@@ -322,9 +494,9 @@ def client_details(request, client_id):
         .order_by("-created_at", "-id")
     )
     tasks = list(
-        Task.objects.filter(contact__client=client)
-        .select_related("contact", "assigned_to", "assigned_by")
-        .order_by("status", "date", "id")
+        Task.objects.filter(client=client)
+        .select_related("client", "contact", "order", "assigned_to", "assigned_by")
+        .order_by("date", "id")
     )
 
     can_change_contact = request.user.has_perm("crm.change_contact")
@@ -345,6 +517,7 @@ def client_details(request, client_id):
         contact.quick_task_url = _build_url(
             "crm_task_create",
             params={
+                "client": client.id,
                 "contact": contact.id,
                 "assigned_by": request.user.id,
                 "assigned_to": request.user.id,
@@ -363,17 +536,22 @@ def client_details(request, client_id):
         )
 
     for task in tasks:
-        task.edit_url = _build_url("crm_task_update", args=[task.id], next_url=current_url) if can_change_task else None
-        task.delete_url = _build_url("crm_task_delete", args=[task.id], next_url=current_url) if can_delete_task else None
-        task.is_overdue = not task.status and task.date < today
+        _decorate_task(
+            task,
+            current_url=current_url,
+            can_change_task=can_change_task,
+            can_delete_task=can_delete_task,
+            can_change_order=can_change_order,
+            today=today,
+        )
 
     stats = {
         "contacts_count": len(contacts),
         "orders_count": len(orders),
         "tasks_count": len(tasks),
-        "open_tasks_count": sum(1 for task in tasks if not task.status),
+        "open_tasks_count": sum(1 for task in tasks if task.is_open),
         "overdue_tasks_count": sum(1 for task in tasks if task.is_overdue),
-        "completed_tasks_count": sum(1 for task in tasks if task.status),
+        "completed_tasks_count": sum(1 for task in tasks if task.is_done),
         "revenue_total": sum((order.items_total for order in orders), Decimal("0.00")),
     }
 
@@ -400,7 +578,7 @@ def contacts_list(request):
         .prefetch_related("tags")
         .annotate(
             orders_count=Count("orders", distinct=True),
-            open_tasks_count=Count("tasks", filter=Q(tasks__status=False), distinct=True),
+            open_tasks_count=Count("tasks", filter=Q(tasks__status__in=Task.OPEN_STATUSES), distinct=True),
         )
         .order_by("-created_at", "full_name")
     )
@@ -426,7 +604,7 @@ def contacts_list(request):
         "total_contacts": Contact.objects.count(),
         "with_email": Contact.objects.exclude(email="").count(),
         "with_phone": Contact.objects.exclude(phone="").count(),
-        "with_open_tasks": Contact.objects.filter(tasks__status=False).distinct().count(),
+        "with_open_tasks": Contact.objects.filter(tasks__status__in=Task.OPEN_STATUSES).distinct().count(),
     }
 
     context = _crm_context(request, "contacts")
@@ -529,57 +707,120 @@ def orders_list(request):
 @roles_required(*INTERNAL_ROLES)
 def tasks_list(request):
     today = timezone.localdate()
-    search = _search_param(request)
-    queryset = (
-        Task.objects.select_related("contact", "contact__client", "assigned_to", "assigned_by")
-        .order_by("status", "date", "id")
+    filter_values = _task_filter_values(request)
+    queryset = _apply_task_filters(
+        _tasks_base_queryset(),
+        request=request,
+        filter_values=filter_values,
+        today=today,
+        include_status=True,
     )
-    if search:
-        queryset = queryset.filter(
-            Q(title__icontains=search)
-            | Q(comment__icontains=search)
-            | Q(contact__full_name__icontains=search)
-            | Q(contact__client__name__icontains=search)
-        )
 
     current_url = request.get_full_path()
     can_change_task = request.user.has_perm("crm.change_task")
     can_delete_task = request.user.has_perm("crm.delete_task")
+    can_change_order = request.user.has_perm("crm.change_order")
     tasks = list(queryset[:100])
     for task in tasks:
-        task.client_url = reverse("client_details", args=[task.contact.client_id])
-        task.edit_url = _build_url("crm_task_update", args=[task.id], next_url=current_url) if can_change_task else None
-        task.delete_url = _build_url("crm_task_delete", args=[task.id], next_url=current_url) if can_delete_task else None
-        task.is_overdue = not task.status and task.date < today
+        _decorate_task(
+            task,
+            current_url=current_url,
+            can_change_task=can_change_task,
+            can_delete_task=can_delete_task,
+            can_change_order=can_change_order,
+            today=today,
+        )
 
-    stats = {
-        "total_tasks": Task.objects.count(),
-        "open_tasks": Task.objects.filter(status=False).count(),
-        "completed_tasks": Task.objects.filter(status=True).count(),
-        "overdue_tasks": Task.objects.filter(status=False, date__lt=today).count(),
-    }
+    stats = _task_stats(queryset, today)
 
     context = _crm_context(request, "tasks")
     context.update(
         {
-            "search": search,
+            "search": filter_values["search"],
             "tasks": tasks,
             "stats": stats,
-            "task_add_url": _build_url(
-                "crm_task_create",
-                params={
-                    "assigned_by": request.user.id,
-                    "assigned_to": request.user.id,
-                    "date": today.isoformat(),
-                },
-                next_url=current_url,
-            )
-            if request.user.has_perm("crm.add_task")
-            else None,
             "today": today,
+            "current_url": current_url,
+            **_task_filter_context(request=request, current_url=current_url, filter_values=filter_values),
         }
     )
     return render(request, "crm/tasks_list.html", context)
+
+
+@roles_required(*INTERNAL_ROLES)
+def tasks_kanban(request):
+    today = timezone.localdate()
+    filter_values = _task_filter_values(request)
+    queryset = _apply_task_filters(
+        _tasks_base_queryset(),
+        request=request,
+        filter_values=filter_values,
+        today=today,
+        include_status=False,
+    )
+
+    current_url = request.get_full_path()
+    can_change_task = request.user.has_perm("crm.change_task")
+    can_delete_task = request.user.has_perm("crm.delete_task")
+    can_change_order = request.user.has_perm("crm.change_order")
+    columns = []
+
+    for status_code, title in TASK_KANBAN_COLUMNS:
+        items = list(queryset.filter(status=status_code)[:50])
+        for task in items:
+            _decorate_task(
+                task,
+                current_url=current_url,
+                can_change_task=can_change_task,
+                can_delete_task=can_delete_task,
+                can_change_order=can_change_order,
+                today=today,
+            )
+            task.status_update_url = reverse("crm_task_status_update", args=[task.id])
+        columns.append({"code": status_code, "title": title, "items": items, "count": len(items)})
+
+    context = _crm_context(request, "tasks")
+    context.update(
+        {
+            "search": filter_values["search"],
+            "stats": _task_stats(queryset, today),
+            "columns": columns,
+            "today": today,
+            "can_change_task": can_change_task,
+            "kanban_status_choices": Task.Status.choices,
+            "current_url": current_url,
+            **_task_filter_context(request=request, current_url=current_url, filter_values=filter_values),
+        }
+    )
+    return render(request, "crm/tasks_kanban.html", context)
+
+
+@roles_required(*INTERNAL_ROLES)
+@require_POST
+def task_status_update(request, task_id):
+    _require_permission(request, "crm.change_task")
+    task = get_object_or_404(Task.objects.select_related("client"), pk=task_id)
+    allowed_statuses = {code for code, _ in Task.Status.choices}
+    new_status = request.POST.get("status", "").strip()
+    if new_status not in allowed_statuses:
+        return HttpResponseBadRequest("Invalid task status.")
+
+    task.status = new_status
+    task.save(update_fields=["status"])
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse(
+            {
+                "id": task.id,
+                "status": task.status,
+                "status_label": task.get_status_display(),
+                "is_done": task.is_done,
+                "tone": TASK_STATUS_TONES.get(task.status, "warning"),
+            }
+        )
+
+    fallback_url = reverse("client_details", args=[task.client_id]) if task.client_id else reverse("crm_tasks_kanban")
+    return _redirect_target(request, fallback_url)
 
 
 @roles_required(*INTERNAL_ROLES)
@@ -917,32 +1158,54 @@ def order_delete(request, order_id):
 def task_create(request):
     _require_permission(request, "crm.add_task")
     user_model = get_user_model()
+    selected_client = _object_from_param(Client.objects.all(), request.GET.get("client"))
     selected_contact = _object_from_param(
         Contact.objects.select_related("client"),
         request.GET.get("contact"),
     )
+    selected_order = _object_from_param(
+        Order.objects.select_related("contact", "contact__client"),
+        request.GET.get("order"),
+    )
     selected_assigned_by = _object_from_param(user_model.objects.all(), request.GET.get("assigned_by")) or request.user
     selected_assigned_to = _object_from_param(user_model.objects.all(), request.GET.get("assigned_to")) or request.user
+    resolved_client = (
+        selected_client
+        or (selected_contact.client if selected_contact else None)
+        or (selected_order.contact.client if selected_order else None)
+    )
     initial = {
+        "client": resolved_client.id if resolved_client else None,
+        "contact": selected_contact.id if selected_contact else None,
+        "order": selected_order.id if selected_order else None,
+        "status": Task.Status.NEW,
         "assigned_by": selected_assigned_by.id if selected_assigned_by else None,
         "assigned_to": selected_assigned_to.id if selected_assigned_to else None,
         "date": request.GET.get("date") or timezone.localdate(),
     }
-    if selected_contact:
-        initial["contact"] = selected_contact.id
 
     if request.method == "POST":
         form = TaskForm(request.POST)
-        sidebar_contact = _object_from_param(Contact.objects.select_related("client"), request.POST.get("contact")) or selected_contact
+        posted_client = _object_from_param(Client.objects.all(), request.POST.get("client"))
+        posted_contact = _object_from_param(Contact.objects.select_related("client"), request.POST.get("contact"))
+        posted_order = _object_from_param(
+            Order.objects.select_related("contact", "contact__client"),
+            request.POST.get("order"),
+        )
+        sidebar_client = (
+            posted_client
+            or (posted_contact.client if posted_contact else None)
+            or (posted_order.contact.client if posted_order else None)
+            or resolved_client
+        )
     else:
         form = TaskForm(initial=initial)
-        sidebar_contact = selected_contact
+        sidebar_client = resolved_client
 
     if request.method == "POST" and form.is_valid():
         task = form.save()
-        return _redirect_target(request, reverse("client_details", args=[task.contact.client_id]))
+        return _redirect_target(request, reverse("client_details", args=[task.client_id]))
 
-    sidebar_client = sidebar_contact.client if sidebar_contact else None
     cancel_url = _safe_next_url(request)
     if not cancel_url:
         cancel_url = reverse("client_details", args=[sidebar_client.id]) if sidebar_client else reverse("crm_tasks")
@@ -953,7 +1216,7 @@ def task_create(request):
         form=form,
         page_title="New task",
         hero_title="Створити задачу",
-        hero_text="Нова CRM-задача створюється в робочому інтерфейсі з прив’язкою до контакту та відповідальних.",
+        hero_text="Нова CRM-задача створюється з прив’язкою до клієнта, контакту, замовлення та відповідальних.",
         submit_label="Створити задачу",
         cancel_url=cancel_url,
         mode_label="Create",
@@ -966,19 +1229,19 @@ def task_create(request):
 @roles_required(*INTERNAL_ROLES)
 def task_update(request, task_id):
     _require_permission(request, "crm.change_task")
-    task = get_object_or_404(Task.objects.select_related("contact", "contact__client", "assigned_by", "assigned_to"), pk=task_id)
-    fallback_url = reverse("client_details", args=[task.contact.client_id])
+    task = get_object_or_404(Task.objects.select_related("client", "contact", "order", "assigned_by", "assigned_to"), pk=task_id)
+    fallback_url = reverse("client_details", args=[task.client_id])
     form = TaskForm(request.POST or None, instance=task)
     if request.method == "POST" and form.is_valid():
         task = form.save()
-        return _redirect_target(request, reverse("client_details", args=[task.contact.client_id]))
+        return _redirect_target(request, reverse("client_details", args=[task.client_id]))
     return _render_form_page(
         request,
         crm_nav="tasks",
         form=form,
         page_title=task.title,
         hero_title="Редагувати задачу",
-        hero_text="Оновлення дедлайну, відповідальних і статусу задачі в окремій CRM-формі.",
+        hero_text="Оновлення статусу, дедлайну, зв’язків із клієнтом, контактом, замовленням і відповідальних у CRM-формі.",
         submit_label="Зберегти задачу",
         cancel_url=_safe_next_url(request) or fallback_url,
         mode_label="Edit",
@@ -987,15 +1250,15 @@ def task_update(request, task_id):
         if request.user.has_perm("crm.delete_task")
         else None,
         full_width_fields=DEFAULT_FULL_WIDTH_FIELDS,
-        client=task.contact.client,
+        client=task.client,
     )
 
 
 @roles_required(*INTERNAL_ROLES)
 def task_delete(request, task_id):
     _require_permission(request, "crm.delete_task")
-    task = get_object_or_404(Task.objects.select_related("contact", "contact__client"), pk=task_id)
-    fallback_url = reverse("client_details", args=[task.contact.client_id])
+    task = get_object_or_404(Task.objects.select_related("client", "contact", "order"), pk=task_id)
+    fallback_url = reverse("client_details", args=[task.client_id])
     delete_error = None
     if request.method == "POST":
         try:
@@ -1013,7 +1276,7 @@ def task_delete(request, task_id):
         confirm_label="Видалити задачу",
         cancel_url=_safe_next_url(request) or fallback_url,
         delete_error=delete_error,
-        client=task.contact.client,
+        client=task.client,
     )
 
 

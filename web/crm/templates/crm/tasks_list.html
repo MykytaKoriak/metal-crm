@@ -3,7 +3,7 @@
 {% block title %}Задачі{% endblock %}
 {% block eyebrow %}CRM tasks{% endblock %}
 {% block hero_title %}Задачі по CRM{% endblock %}
-{% block hero_text %}Окремий список задач у стилі нового dashboard з переходом до клієнтської картки та власними CRUD-діями.{% endblock %}
+{% block hero_text %}Список задач з фільтрами, статусами та переходом у kanban.{% endblock %}
 
 {% block hero_stats %}
     <div class="chip">
@@ -11,12 +11,20 @@
         <span>Усього задач</span>
     </div>
     <div class="chip">
-        <strong>{{ stats.open_tasks }}</strong>
-        <span>Відкриті</span>
+        <strong>{{ stats.new_tasks }}</strong>
+        <span>Нові</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.in_progress_tasks }}</strong>
+        <span>В роботі</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.waiting_tasks }}</strong>
+        <span>Очікують</span>
     </div>
     <div class="chip">
         <strong>{{ stats.completed_tasks }}</strong>
-        <span>Виконані</span>
+        <span>Виконано</span>
     </div>
     <div class="chip">
         <strong>{{ stats.overdue_tasks }}</strong>
@@ -28,12 +36,52 @@
     <section class="panel">
         <div class="toolbar">
             <form method="get" class="search-form">
-                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві, коментарю, клієнту, контакту">
-                <button type="submit">Знайти</button>
+                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві, коментарю, клієнту, контакту, замовленню">
+                <select name="assigned_to">
+                    <option value="">Усі відповідальні</option>
+                    <option value="mine"{% if selected_assigned_to == "mine" %} selected{% endif %}>Мої задачі</option>
+                    {% for user_option in assigned_to_options %}
+                        <option value="{{ user_option.id }}"{% if selected_assigned_to == user_option.id|stringformat:"s" %} selected{% endif %}>
+                            {{ user_option.email|default:user_option.username }}
+                        </option>
+                    {% endfor %}
+                </select>
+                <select name="client">
+                    <option value="">Усі клієнти</option>
+                    {% for client_option in client_options %}
+                        <option value="{{ client_option.id }}"{% if selected_client_id == client_option.id|stringformat:"s" %} selected{% endif %}>
+                            {{ client_option.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+                <select name="order">
+                    <option value="">Усі замовлення</option>
+                    {% for order_option in order_options %}
+                        <option value="{{ order_option.id }}"{% if selected_order_id == order_option.id|stringformat:"s" %} selected{% endif %}>
+                            {% if order_option.title %}{{ order_option.title }}{% else %}Замовлення #{{ order_option.id }}{% endif %}
+                        </option>
+                    {% endfor %}
+                </select>
+                <select name="status">
+                    <option value="">Усі статуси</option>
+                    {% for code, label in task_status_choices %}
+                        <option value="{{ code }}"{% if selected_status == code %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <select name="deadline">
+                    {% for code, label in deadline_options %}
+                        <option value="{{ code }}"{% if selected_deadline == code %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit">Фільтрувати</button>
+                <a href="{% url 'crm_tasks' %}">Скинути</a>
             </form>
-            {% if task_add_url %}
-                <a href="{{ task_add_url }}">Нова задача</a>
-            {% endif %}
+            <div class="link-row">
+                <a href="{{ task_kanban_url }}">Kanban</a>
+                {% if task_add_url %}
+                    <a href="{{ task_add_url }}">Нова задача</a>
+                {% endif %}
+            </div>
         </div>
     </section>
 
@@ -46,15 +94,26 @@
                     <article class="item-card">
                         <h3>{% if task.edit_url %}<a href="{{ task.edit_url }}">{{ task.title }}</a>{% else %}{{ task.title }}{% endif %}</h3>
                         <p class="meta-line">
-                            <a href="{{ task.client_url }}">{{ task.contact.client.name }}</a> · {{ task.contact.full_name }} · {{ task.date|date:"d.m.Y" }}
+                            <a href="{{ task.client_url }}">{{ task.client.name }}</a>
+                            {% if task.contact %}
+                                · {{ task.contact.full_name }}
+                            {% endif %}
+                            · {{ task.date|date:"d.m.Y" }}
+                            <span class="pill {{ task.status_tone }}">{{ task.get_status_display }}</span>
                             {% if task.is_overdue %}
                                 <span class="pill overdue">прострочено</span>
-                            {% elif task.status %}
-                                <span class="pill healthy">виконано</span>
-                            {% else %}
-                                <span class="pill warning">відкрита</span>
                             {% endif %}
                         </p>
+                        {% if task.order_id %}
+                            <p>
+                                Замовлення:
+                                {% if task.order_url %}
+                                    <a href="{{ task.order_url }}">{% if task.order.title %}{{ task.order.title }}{% else %}Замовлення #{{ task.order_id }}{% endif %}</a>
+                                {% else %}
+                                    {% if task.order.title %}{{ task.order.title }}{% else %}Замовлення #{{ task.order_id }}{% endif %}
+                                {% endif %}
+                            </p>
+                        {% endif %}
                         <p>Ким створено: {% if task.assigned_by %}{{ task.assigned_by.email|default:task.assigned_by.username }}{% else %}—{% endif %}</p>
                         <p>Відповідальний: {% if task.assigned_to %}{{ task.assigned_to.email|default:task.assigned_to.username }}{% else %}—{% endif %}</p>
                         {% if task.comment %}

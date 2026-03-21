@@ -120,12 +120,13 @@ class TestClientWorkspaceView(CrmWorkspaceMixin, TestCase):
         )
         self.order = self.create_order(self.contact, manager=self.user)
         self.task = Task.objects.create(
+            client=self.client_obj,
             contact=self.contact,
             title="Call the client",
             assigned_by=self.user,
             assigned_to=self.user,
             date=timezone.localdate() - timedelta(days=1),
-            status=False,
+            status=Task.Status.NEW,
             comment="Need delivery details",
         )
 
@@ -173,7 +174,7 @@ class TestClientWorkspaceView(CrmWorkspaceMixin, TestCase):
 
 
 class TestClientDetailsWithoutContacts(CrmWorkspaceMixin, TestCase):
-    def test_order_and_task_actions_are_blocked_without_contact(self):
+    def test_order_is_blocked_but_task_creation_is_available_without_contact(self):
         user = self.create_user_with_role("sales-no-contact@example.com", UserProfile.Role.SALES_MANAGER)
         client_obj = Client.objects.create(name="No Contact Client")
 
@@ -182,7 +183,7 @@ class TestClientDetailsWithoutContacts(CrmWorkspaceMixin, TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Для замовлення потрібен контакт")
-        self.assertContains(response, "Для задачі потрібен контакт")
+        self.assertContains(response, reverse("crm_task_create"))
 
 
 class TestCustomCrmWorkspacePages(CrmWorkspaceMixin, TestCase):
@@ -192,12 +193,13 @@ class TestCustomCrmWorkspacePages(CrmWorkspaceMixin, TestCase):
         contact = Contact.objects.create(client=client_obj, full_name="Workspace Contact")
         self.create_order(contact, manager=self.user)
         Task.objects.create(
+            client=client_obj,
             contact=contact,
             title="Workspace task",
             assigned_by=self.user,
             assigned_to=self.user,
             date=timezone.localdate(),
-            status=False,
+            status=Task.Status.NEW,
         )
 
     def test_custom_crm_pages_render_in_dashboard_style(self):
@@ -364,8 +366,10 @@ class TestCrmCrudViews(CrmWorkspaceMixin, TestCase):
         create_response = self.client.post(
             reverse("crm_task_create"),
             {
+                "client": str(self.base_client.id),
                 "contact": str(self.base_contact.id),
                 "title": "Workspace Task",
+                "status": Task.Status.NEW,
                 "assigned_by": str(self.user.id),
                 "assigned_to": str(self.user.id),
                 "date": timezone.localdate().isoformat(),
@@ -378,23 +382,52 @@ class TestCrmCrudViews(CrmWorkspaceMixin, TestCase):
         update_response = self.client.post(
             reverse("crm_task_update", args=[task.id]),
             {
+                "client": str(self.base_client.id),
                 "contact": str(self.base_contact.id),
                 "title": "Workspace Task Updated",
+                "status": Task.Status.DONE,
                 "assigned_by": str(self.user.id),
                 "assigned_to": str(self.user.id),
                 "date": (timezone.localdate() + timedelta(days=1)).isoformat(),
-                "status": "on",
                 "comment": "Task completed",
             },
         )
         task.refresh_from_db()
         self.assertEqual(task.title, "Workspace Task Updated")
-        self.assertTrue(task.status)
+        self.assertEqual(task.status, Task.Status.DONE)
         self.assertRedirects(update_response, reverse("client_details", args=[self.base_client.id]))
 
         delete_response = self.client.post(reverse("crm_task_delete", args=[task.id]))
         self.assertRedirects(delete_response, reverse("client_details", args=[self.base_client.id]))
         self.assertFalse(Task.objects.filter(id=task.id).exists())
+
+    def test_task_kanban_and_status_update_endpoint(self):
+        order = self.create_order(self.base_contact, manager=self.user)
+        task = Task.objects.create(
+            client=self.base_client,
+            order=order,
+            title="Kanban Task",
+            assigned_by=self.user,
+            assigned_to=self.user,
+            date=timezone.localdate(),
+            status=Task.Status.NEW,
+        )
+
+        kanban_response = self.client.get(reverse("crm_tasks_kanban"), {"assigned_to": "mine"})
+        self.assertEqual(kanban_response.status_code, 200)
+        self.assertContains(kanban_response, "Kanban-дошка задач")
+        self.assertContains(kanban_response, "Kanban Task")
+
+        update_response = self.client.post(
+            reverse("crm_task_status_update", args=[task.id]),
+            {"status": Task.Status.WAITING},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        task.refresh_from_db()
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.json()["status"], Task.Status.WAITING)
+        self.assertEqual(task.status, Task.Status.WAITING)
+        self.assertEqual(task.contact, order.contact)
 
     def test_order_crud_flow_with_items(self):
         product = self.create_product(name_prefix="Order Product")

@@ -6,18 +6,20 @@
     <title>{% block title %}Dashboard{% endblock %}</title>
     <style>
         :root {
-            --bg: #efe7db;
-            --panel: rgba(255, 252, 246, 0.94);
-            --panel-strong: #fffdf8;
-            --ink: #213038;
-            --muted: #5c6970;
-            --line: #d7ccbc;
-            --accent: #8f5c2c;
-            --accent-strong: #6d431f;
-            --danger: #a33a31;
-            --warning: #b57a1b;
-            --ok: #2f7852;
-            --shadow: 0 16px 40px rgba(33, 48, 56, 0.08);
+            --bg: #eef1f4;
+            --surface: #ffffff;
+            --surface-muted: #f6f7f9;
+            --surface-strong: #ffffff;
+            --panel-strong: #ffffff;
+            --ink: #1f2933;
+            --muted: #667085;
+            --line: #d8dde5;
+            --line-strong: #c6ced8;
+            --accent: #1f5f57;
+            --accent-soft: #e8f1ef;
+            --danger: #b42318;
+            --warning: #b54708;
+            --ok: #027a48;
         }
 
         * {
@@ -26,218 +28,255 @@
 
         body {
             margin: 0;
+            background: var(--bg);
             color: var(--ink);
-            font-family: Georgia, "Times New Roman", serif;
-            background:
-                radial-gradient(circle at top left, rgba(143, 92, 44, 0.12), transparent 28%),
-                radial-gradient(circle at bottom right, rgba(47, 120, 82, 0.08), transparent 24%),
-                linear-gradient(180deg, #f6f0e5 0%, var(--bg) 100%);
+            font-family: "Segoe UI", "Aptos", sans-serif;
+            line-height: 1.4;
         }
 
         a {
-            color: inherit;
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        button,
+        input,
+        select,
+        textarea {
+            font: inherit;
         }
 
         .shell {
-            max-width: 1280px;
+            width: min(1820px, calc(100% - 16px));
             margin: 0 auto;
-            padding: 28px 20px 48px;
+            padding: 8px 0 16px;
         }
 
         .topbar,
+        .menu-bar,
+        .context-bar,
         .hero,
         .panel {
+            background: var(--surface);
             border: 1px solid var(--line);
-            background: var(--panel);
-            box-shadow: var(--shadow);
+            border-radius: 8px;
+        }
+
+        .topbar,
+        .menu-bar,
+        .context-bar {
+            margin-bottom: 8px;
         }
 
         .topbar {
-            border-radius: 24px;
-            padding: 18px 20px;
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
             align-items: center;
-            margin-bottom: 22px;
+            padding: 8px 12px;
+        }
+
+        .brand {
+            min-width: 0;
         }
 
         .brand small,
-        .eyebrow {
+        .eyebrow,
+        .menu-label {
             display: block;
+            margin: 0 0 3px;
             color: var(--muted);
-            text-transform: uppercase;
+            font-size: 10px;
             letter-spacing: 0.08em;
-            font-size: 12px;
-            margin-bottom: 6px;
+            text-transform: uppercase;
+        }
+
+        .brand strong,
+        .hero h1,
+        .panel h2,
+        .panel h3,
+        .context-title {
+            color: var(--ink);
+            font-weight: 600;
         }
 
         .brand strong {
-            font-size: 20px;
+            display: block;
+            font-size: 15px;
+            line-height: 1.2;
         }
 
-        .nav {
+        .topbar-role,
+        .muted,
+        .context-meta {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .nav,
+        .crm-nav,
+        .context-actions,
+        .hero-stats,
+        .link-row {
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 6px;
             align-items: center;
         }
 
+        .nav {
+            justify-content: flex-end;
+        }
+
+        .nav form {
+            margin: 0;
+        }
+
         .nav a,
-        .nav button {
-            padding: 10px 14px;
+        .nav button,
+        .crm-nav a,
+        .context-actions a,
+        .context-actions span,
+        .button-link,
+        .link-row a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 30px;
+            padding: 4px 8px;
             border: 1px solid var(--line);
-            border-radius: 999px;
+            border-radius: 6px;
+            background: var(--surface-muted);
+            color: var(--ink);
             text-decoration: none;
-            background: rgba(255, 253, 247, 0.95);
-            font: inherit;
+            white-space: nowrap;
+        }
+
+        .nav a:hover,
+        .nav button:hover,
+        .crm-nav a:hover,
+        .context-actions a:hover,
+        .button-link:hover,
+        .link-row a:hover {
+            background: #eef2f6;
+            text-decoration: none;
+        }
+
+        .nav .active,
+        .crm-nav .active,
+        .button-link.primary {
+            border-color: var(--accent);
+            background: var(--accent-soft);
+            color: var(--accent);
+        }
+
+        .nav button {
             cursor: pointer;
         }
 
-        .nav .active {
-            background: var(--accent);
-            color: #fff9f2;
-            border-color: var(--accent);
+        .menu-bar,
+        .context-bar {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 8px 12px;
+            align-items: center;
+            padding: 8px 12px;
+        }
+
+        .menu-strip,
+        .context-main {
+            min-width: 0;
+        }
+
+        .menu-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            align-items: center;
+        }
+
+        .crm-nav a,
+        .context-actions a,
+        .context-actions span {
+            min-height: 28px;
+            padding: 4px 8px;
+            font-size: 12px;
+        }
+
+        .context-title {
+            display: block;
+            margin-bottom: 1px;
+            font-size: 14px;
+        }
+
+        .context-actions span {
+            color: var(--muted);
         }
 
         .hero {
-            border-radius: 28px;
-            padding: 24px;
-            margin-bottom: 22px;
             display: grid;
-            grid-template-columns: 1.2fr 0.8fr;
-            gap: 18px;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: start;
+            padding: 10px 12px;
+            margin-bottom: 8px;
         }
 
         .hero h1 {
-            margin: 0 0 10px;
-            font-size: clamp(30px, 4.8vw, 52px);
-            line-height: 0.95;
+            margin: 0 0 4px;
+            font-size: 20px;
+            line-height: 1.2;
         }
 
         .hero p {
             margin: 0;
+            max-width: 96ch;
             color: var(--muted);
-            line-height: 1.5;
+            font-size: 13px;
         }
 
         .hero-stats {
-            display: grid;
-            gap: 12px;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            justify-content: flex-end;
+        }
+
+        .chip,
+        .metric,
+        .item-card,
+        .kanban-card {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 6px;
         }
 
         .chip {
-            border: 1px solid var(--line);
-            border-radius: 18px;
-            padding: 14px;
-            background: var(--panel-strong);
+            min-width: 104px;
+            padding: 8px 10px;
+            background: var(--surface-muted);
         }
 
-        .chip strong {
+        .chip strong,
+        .metric strong {
             display: block;
-            font-size: 28px;
-            margin-bottom: 4px;
+            margin-bottom: 2px;
+            font-size: 18px;
+            font-weight: 600;
+            line-height: 1;
+        }
+
+        .chip span,
+        .metric span {
+            color: var(--muted);
+            font-size: 11px;
         }
 
         .section-grid {
             display: grid;
-            gap: 20px;
-        }
-
-        .workspace-layout {
-            display: grid;
-            grid-template-columns: 260px minmax(0, 1fr);
-            gap: 20px;
-            align-items: start;
-        }
-
-        .workspace-main {
-            min-width: 0;
-        }
-
-        .sidebar {
-            position: sticky;
-            top: 20px;
-            border: 1px solid var(--line);
-            background: rgba(255, 251, 243, 0.96);
-            box-shadow: var(--shadow);
-            border-radius: 24px;
-            padding: 18px;
-        }
-
-        .sidebar h2,
-        .sidebar h3 {
-            margin: 0 0 10px;
-        }
-
-        .sidebar-copy {
-            margin: 0 0 14px;
-            color: var(--muted);
-            font-size: 14px;
-            line-height: 1.5;
-        }
-
-        .sidebar-nav {
-            display: grid;
-            gap: 10px;
-        }
-
-        .sidebar-link {
-            display: block;
-            border: 1px solid var(--line);
-            border-radius: 18px;
-            padding: 12px 14px;
-            text-decoration: none;
-            background: var(--panel-strong);
-            transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
-        }
-
-        .sidebar-link strong {
-            display: block;
-            margin-bottom: 4px;
-        }
-
-        .sidebar-link span {
-            color: var(--muted);
-            font-size: 13px;
-            line-height: 1.4;
-        }
-
-        .sidebar-link:hover {
-            transform: translateX(2px);
-            border-color: rgba(143, 92, 44, 0.35);
-        }
-
-        .sidebar-link.active {
-            background: rgba(143, 92, 44, 0.12);
-            border-color: rgba(143, 92, 44, 0.35);
-        }
-
-        .sidebar-section {
-            padding-top: 16px;
-            margin-top: 16px;
-            border-top: 1px solid rgba(215, 204, 188, 0.7);
-        }
-
-        .sidebar-actions {
-            display: grid;
             gap: 8px;
-        }
-
-        .sidebar-actions a,
-        .sidebar-actions span {
-            display: block;
-            border-radius: 14px;
-            border: 1px solid var(--line);
-            padding: 10px 12px;
-            text-decoration: none;
-            background: var(--panel-strong);
-        }
-
-        .sidebar-actions span {
-            color: var(--muted);
-            background: rgba(215, 204, 188, 0.26);
         }
 
         .two-up {
@@ -249,190 +288,229 @@
         }
 
         .panel {
-            border-radius: 24px;
-            padding: 22px;
+            padding: 12px;
+        }
+
+        .panel-head {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
         }
 
         .panel h2,
         .panel h3 {
-            margin: 0 0 12px;
+            margin: 0 0 8px;
+            font-size: 16px;
+            line-height: 1.25;
         }
 
         .metrics {
             display: grid;
-            gap: 12px;
+            gap: 8px;
             grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
         }
 
         .metric {
-            background: var(--panel-strong);
-            border: 1px solid var(--line);
-            border-radius: 18px;
-            padding: 14px;
+            padding: 10px;
         }
 
-        .metric strong {
-            display: block;
-            font-size: 26px;
-            margin-bottom: 6px;
+        .mini-list,
+        .kanban-stack {
+            display: grid;
+            gap: 8px;
         }
 
-        .muted {
-            color: var(--muted);
+        .item-card,
+        .kanban-card {
+            padding: 10px;
+        }
+
+        .item-card h3,
+        .item-card h4,
+        .kanban-card h3 {
+            margin: 0 0 4px;
+            font-size: 14px;
+            line-height: 1.25;
+        }
+
+        .item-card p,
+        .kanban-card p {
+            margin: 4px 0 0;
+            font-size: 13px;
+        }
+
+        .link-row {
+            margin-top: 8px;
+        }
+
+        .link-row a {
+            min-height: 28px;
+            padding: 4px 8px;
+            font-size: 12px;
+        }
+
+        .table-wrap {
+            overflow-x: auto;
         }
 
         .table {
             width: 100%;
+            min-width: 640px;
             border-collapse: collapse;
         }
 
         .table th,
         .table td {
-            padding: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--line);
             text-align: left;
-            border-bottom: 1px solid rgba(215, 204, 188, 0.72);
             vertical-align: top;
+            font-size: 13px;
         }
 
         .table th {
             color: var(--muted);
-            font-weight: normal;
-            font-size: 13px;
+            font-size: 11px;
+            font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.06em;
+            letter-spacing: 0.05em;
         }
 
         .pill {
             display: inline-flex;
             align-items: center;
-            padding: 6px 10px;
+            justify-content: center;
+            min-height: 22px;
+            padding: 2px 7px;
             border-radius: 999px;
-            font-size: 12px;
             border: 1px solid transparent;
+            font-size: 11px;
+            font-weight: 600;
         }
 
         .pill.healthy {
             color: var(--ok);
-            background: rgba(47, 120, 82, 0.1);
-            border-color: rgba(47, 120, 82, 0.18);
+            background: rgba(2, 122, 72, 0.08);
+            border-color: rgba(2, 122, 72, 0.16);
         }
 
         .pill.warning {
             color: var(--warning);
-            background: rgba(181, 122, 27, 0.1);
-            border-color: rgba(181, 122, 27, 0.18);
+            background: rgba(181, 71, 8, 0.08);
+            border-color: rgba(181, 71, 8, 0.16);
         }
 
         .pill.critical,
         .pill.overdue {
             color: var(--danger);
-            background: rgba(163, 58, 49, 0.1);
-            border-color: rgba(163, 58, 49, 0.18);
-        }
-
-        .mini-list {
-            display: grid;
-            gap: 12px;
-        }
-
-        .item-card {
-            border: 1px solid var(--line);
-            border-radius: 18px;
-            padding: 14px 16px;
-            background: var(--panel-strong);
-        }
-
-        .item-card h3,
-        .item-card h4 {
-            margin: 0 0 6px;
-        }
-
-        .item-card p {
-            margin: 4px 0 0;
+            background: rgba(180, 35, 24, 0.08);
+            border-color: rgba(180, 35, 24, 0.16);
         }
 
         .kanban {
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            gap: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 8px;
         }
 
         .kanban-column {
-            background: rgba(255, 251, 244, 0.82);
+            padding: 8px;
             border: 1px solid var(--line);
-            border-radius: 20px;
-            padding: 14px;
+            border-radius: 6px;
+            background: var(--surface-muted);
         }
 
         .kanban-column h3 {
-            margin: 0 0 12px;
-        }
-
-        .kanban-stack {
-            display: grid;
-            gap: 10px;
-        }
-
-        .kanban-card {
-            border: 1px solid var(--line);
-            border-radius: 16px;
-            padding: 12px 14px;
-            background: var(--panel-strong);
+            margin: 0 0 8px;
+            font-size: 14px;
         }
 
         .bar-row {
             display: grid;
-            grid-template-columns: 88px 1fr auto;
-            gap: 12px;
+            grid-template-columns: 120px minmax(0, 1fr) auto;
+            gap: 8px;
             align-items: center;
-            margin-bottom: 12px;
+            margin-bottom: 8px;
         }
 
         .bar-track {
-            height: 12px;
+            height: 8px;
             border-radius: 999px;
-            background: rgba(215, 204, 188, 0.5);
+            background: #e7ebf0;
             overflow: hidden;
         }
 
         .bar-fill {
             height: 100%;
             border-radius: 999px;
-            background: linear-gradient(90deg, var(--accent), #d3a86d);
+            background: var(--accent);
         }
 
         #dashboard-calendar {
             border: 1px solid var(--line);
-            border-radius: 18px;
-            background: #fff;
-            padding: 10px;
+            border-radius: 6px;
+            background: var(--surface);
+            padding: 8px;
         }
 
         .empty {
             margin: 0;
             color: var(--muted);
+            font-size: 13px;
         }
 
-        @media (max-width: 980px) {
-            .workspace-layout,
+        @media (max-width: 1100px) {
             .hero,
             .two-up,
-            .three-up,
-            .kanban {
+            .three-up {
                 grid-template-columns: 1fr;
             }
 
-            .topbar {
-                align-items: flex-start;
-                flex-direction: column;
-            }
-
             .hero-stats {
-                grid-template-columns: 1fr 1fr;
+                justify-content: flex-start;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .shell {
+                width: min(100% - 8px, 1820px);
             }
 
-            .sidebar {
-                position: static;
+            .topbar,
+            .menu-bar,
+            .context-bar,
+            .hero,
+            .panel {
+                padding: 8px 10px;
+            }
+
+            .topbar {
+                grid-template-columns: 1fr;
+            }
+
+            .nav {
+                justify-content: flex-start;
+            }
+
+            .hero h1 {
+                font-size: 18px;
+            }
+
+            .chip {
+                min-width: 0;
+                flex: 1 1 92px;
+            }
+
+            .bar-row {
+                grid-template-columns: 1fr;
+                gap: 4px;
+            }
+
+            .table {
+                min-width: 560px;
             }
         }
     </style>
@@ -444,7 +522,7 @@
         <div class="brand">
             <small>MK CRM</small>
             <strong>{{ profile.display_name }}</strong>
-            <div class="muted">{{ profile.get_role_display }}</div>
+            <div class="topbar-role">{{ profile.get_role_display }}</div>
         </div>
         <nav class="nav">
             <a href="{% url 'dashboard' %}" class="{% if active_section == 'dashboard' %}active{% endif %}">Dashboard</a>
@@ -459,96 +537,78 @@
         </nav>
     </header>
 
-    <div class="workspace-layout">
-        <aside class="sidebar">
-            <span class="eyebrow">CRM</span>
-            <h2>Робоче меню</h2>
-            <p class="sidebar-copy">Зліва тільки CRM-навігація. Верхня панель залишається для глобальних переходів.</p>
+    {% if perms.crm.view_client or perms.crm.view_contact or perms.crm.view_order or perms.crm.view_task or perms.crm.view_product %}
+        <section class="menu-bar">
+            <div class="menu-strip">
+                <span class="menu-label">Робоче меню</span>
+                <nav class="crm-nav">
+                    {% if perms.crm.view_client %}
+                        <a href="{% url 'crm_clients' %}" class="{% if crm_nav == 'clients' %}active{% endif %}">Клієнти</a>
+                    {% endif %}
+                    {% if perms.crm.view_contact %}
+                        <a href="{% url 'crm_contacts' %}" class="{% if crm_nav == 'contacts' %}active{% endif %}">Контакти</a>
+                    {% endif %}
+                    {% if perms.crm.view_order %}
+                        <a href="{% url 'crm_orders' %}" class="{% if crm_nav == 'orders' %}active{% endif %}">Замовлення</a>
+                    {% endif %}
+                    {% if perms.crm.view_task %}
+                        <a href="{% url 'crm_tasks' %}" class="{% if crm_nav == 'tasks' %}active{% endif %}">Задачі</a>
+                    {% endif %}
+                    {% if perms.crm.view_product %}
+                        <a href="{% url 'crm_products' %}" class="{% if crm_nav == 'products' %}active{% endif %}">Продукти</a>
+                    {% endif %}
+                </nav>
+            </div>
+        </section>
+    {% endif %}
 
-            <nav class="sidebar-nav">
-                {% if perms.crm.view_client %}
-                    <a href="{% url 'crm_clients' %}" class="sidebar-link{% if crm_nav == 'clients' %} active{% endif %}">
-                        <strong>Клієнти</strong>
-                        <span>База клієнтів і перехід у робочі картки.</span>
-                    </a>
-                {% endif %}
-                {% if perms.crm.view_contact %}
-                    <a href="{% url 'crm_contacts' %}" class="sidebar-link{% if crm_nav == 'contacts' %} active{% endif %}">
-                        <strong>Контакти</strong>
-                        <span>Контактні особи, телефони, email і джерела.</span>
-                    </a>
-                {% endif %}
-                {% if perms.crm.view_order %}
-                    <a href="{% url 'crm_orders' %}" class="sidebar-link{% if crm_nav == 'orders' %} active{% endif %}">
-                        <strong>Замовлення</strong>
-                        <span>Статуси, дедлайни, доставка, оплата і менеджери.</span>
-                    </a>
-                {% endif %}
-                {% if perms.crm.view_task %}
-                    <a href="{% url 'crm_tasks' %}" class="sidebar-link{% if crm_nav == 'tasks' %} active{% endif %}">
-                        <strong>Задачі</strong>
-                        <span>Поточні задачі по клієнтах і контроль дедлайнів.</span>
-                    </a>
-                {% endif %}
-                {% if perms.crm.view_product %}
-                    <a href="{% url 'crm_products' %}" class="sidebar-link{% if crm_nav == 'products' %} active{% endif %}">
-                        <strong>Продукти</strong>
-                        <span>SKU, описи, базові ціни і технічні дані.</span>
-                    </a>
-                {% endif %}
-            </nav>
-
-            {% if client %}
-                <section class="sidebar-section">
-                    <span class="eyebrow">Поточний клієнт</span>
-                    <h3>{{ client.name }}</h3>
-                    <p class="sidebar-copy">
-                        {% if client.tax_code %}{{ client.tax_code }} · {% endif %}
-                        {{ client.get_client_type_display }}
-                    </p>
-                    <div class="sidebar-actions">
-                        <a href="{% url 'client_details' client.id %}">Оновити картку</a>
-                        {% if client_edit_url %}
-                            <a href="{{ client_edit_url }}">Редагувати клієнта</a>
-                        {% endif %}
-                        {% if client_delete_url %}
-                            <a href="{{ client_delete_url }}">Видалити клієнта</a>
-                        {% endif %}
-                        {% if contact_add_url %}
-                            <a href="{{ contact_add_url }}">Новий контакт</a>
-                        {% endif %}
-                        {% if order_add_url %}
-                            <a href="{{ order_add_url }}">Нове замовлення</a>
-                        {% elif can_add_order %}
-                            <span>Для замовлення потрібен контакт</span>
-                        {% endif %}
-                        {% if task_add_url %}
-                            <a href="{{ task_add_url }}">Нова задача</a>
-                        {% elif can_add_task %}
-                            <span>Для задачі потрібен контакт</span>
-                        {% endif %}
-                    </div>
-                </section>
-            {% endif %}
-        </aside>
-
-        <div class="workspace-main">
-            <section class="hero">
-                <div>
-                    <span class="eyebrow">{% block eyebrow %}Role dashboard{% endblock %}</span>
-                    <h1>{% block hero_title %}Dashboard{% endblock %}</h1>
-                    <p>{% block hero_text %}{% endblock %}</p>
+    {% if client %}
+        <section class="context-bar">
+            <div class="context-main">
+                <span class="eyebrow">Поточний клієнт</span>
+                <span class="context-title">{{ client.name }}</span>
+                <div class="context-meta">
+                    {% if client.tax_code %}{{ client.tax_code }} · {% endif %}
+                    {{ client.get_client_type_display }}
                 </div>
-                <div class="hero-stats">
-                    {% block hero_stats %}{% endblock %}
-                </div>
-            </section>
+            </div>
+            <div class="context-actions">
+                <a href="{% url 'client_details' client.id %}">Картка</a>
+                {% if client_edit_url %}
+                    <a href="{{ client_edit_url }}">Редагувати</a>
+                {% endif %}
+                {% if contact_add_url %}
+                    <a href="{{ contact_add_url }}">Контакт</a>
+                {% endif %}
+                {% if order_add_url %}
+                    <a href="{{ order_add_url }}">Замовлення</a>
+                {% elif can_add_order %}
+                    <span>Потрібен контакт</span>
+                {% endif %}
+                {% if task_add_url %}
+                    <a href="{{ task_add_url }}">Задача</a>
+                {% endif %}
+                {% if client_delete_url %}
+                    <a href="{{ client_delete_url }}">Видалити</a>
+                {% endif %}
+            </div>
+        </section>
+    {% endif %}
 
-            <main class="section-grid">
-                {% block content %}{% endblock %}
-            </main>
+    <section class="hero">
+        <div>
+            <span class="eyebrow">{% block eyebrow %}Role dashboard{% endblock %}</span>
+            <h1>{% block hero_title %}Dashboard{% endblock %}</h1>
+            <p>{% block hero_text %}{% endblock %}</p>
         </div>
-    </div>
+        <div class="hero-stats">
+            {% block hero_stats %}{% endblock %}
+        </div>
+    </section>
+
+    <main class="section-grid">
+        {% block content %}{% endblock %}
+    </main>
 </div>
 {% block extra_scripts %}{% endblock %}
 </body>

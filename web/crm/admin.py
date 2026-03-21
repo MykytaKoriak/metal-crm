@@ -118,6 +118,7 @@ class OrderAdmin(admin.ModelAdmin):
         "title_display",
         "contact",
         "manager",
+        "priority",
         "status",
         "deadline",
         "created_at",
@@ -125,7 +126,7 @@ class OrderAdmin(admin.ModelAdmin):
         "payment_type",
         "delivery_method",
     ]
-    list_filter = ["status", "manager", "payment_type", "delivery_method"]
+    list_filter = ["priority", "status", "manager", "payment_type", "delivery_method"]
     search_fields = [
         "title",
         "contact__full_name",
@@ -150,6 +151,7 @@ class OrderAdmin(admin.ModelAdmin):
             "fields": (
                 "contact",
                 "manager",
+                "priority",
                 "status",
                 "title",
                 ("deadline", "created_at"),
@@ -223,29 +225,39 @@ class OrderAdmin(admin.ModelAdmin):
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
     list_display = [
-        "title_link",     # клик по задаче ведёт на картку клієнта
+        "title_link",
+        "client_link",
         "contact_link",
+        "order_link",
         "assigned_to",
         "assigned_by",
-        "date",           # ← ВАЖНО: date, не due_date
+        "date",
         "status",
     ]
 
     list_display_links = None
 
     list_filter = [
-        # если делал кастомные фильтры:
-        # AssignedToMeFilter,
-        # AssignedByMeFilter,
         "status",
+        "client",
+        "assigned_to",
     ]
 
-    search_fields = ["title", "contact__full_name", "contact__phone", "contact__email"]
+    search_fields = [
+        "title",
+        "comment",
+        "client__name",
+        "contact__full_name",
+        "contact__phone",
+        "contact__email",
+        "order__title",
+    ]
     ordering = ["date", "id"]
+    autocomplete_fields = ["client", "contact", "order", "assigned_to", "assigned_by"]
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related("contact", "assigned_to", "assigned_by")
+        return qs.select_related("client", "contact", "order", "assigned_to", "assigned_by")
 
     @admin.display(description="Назва задачі")
     def title_link(self, obj):
@@ -253,7 +265,20 @@ class TaskAdmin(admin.ModelAdmin):
         return format_html('<a href="{}">{}</a>', url, obj.title)
 
     @admin.display(description="Клієнт")
+    def client_link(self, obj):
+        url = reverse("admin:crm_client_change", args=[obj.client_id])
+        return format_html('<a href="{}">{}</a>', url, obj.client.name)
+
+    @admin.display(description="Контакт")
     def contact_link(self, obj):
-        client = Contact.objects.get(id=obj.contact.id)
+        if not obj.contact_id:
+            return "—"
         url = reverse("admin:crm_contact_change", args=[obj.contact_id])
-        return format_html('<a href="{}">{}</a>', url, client.full_name)
+        return format_html('<a href="{}">{}</a>', url, obj.contact.full_name)
+
+    @admin.display(description="Замовлення")
+    def order_link(self, obj):
+        if not obj.order_id:
+            return "—"
+        url = reverse("admin:crm_order_change", args=[obj.order_id])
+        return format_html('<a href="{}">{}</a>', url, obj.order.title or f"Order #{obj.order_id}")

@@ -232,6 +232,12 @@ class Order(models.Model):
         COMPLETED = "completed", "Завершений"
         CANCELED = "canceled", "Скасований"
 
+    class Priority(models.TextChoices):
+        LOW = "low", "Низький"
+        NORMAL = "normal", "Нормальний"
+        HIGH = "high", "Високий"
+        URGENT = "urgent", "Терміновий"
+
     class PaymentType(models.TextChoices):
         COD = "cod", "Післяплата"
         PREPAY = "prepay", "Передоплата"
@@ -260,6 +266,14 @@ class Order(models.Model):
         null=True,
         blank=True,
         verbose_name="Manager",
+    )
+
+    priority = models.CharField(
+        "Пріоритет",
+        max_length=16,
+        choices=Priority.choices,
+        default=Priority.NORMAL,
+        db_index=True,
     )
 
     status = models.CharField(
@@ -384,11 +398,35 @@ class Order(models.Model):
 
 
 class Task(models.Model):
-    contact = models.ForeignKey(
-        "crm.Contact",
+    class Status(models.TextChoices):
+        NEW = "new", "Нова"
+        IN_PROGRESS = "in_progress", "В роботі"
+        WAITING = "waiting", "Очікує"
+        DONE = "done", "Виконано"
+
+    OPEN_STATUSES = (Status.NEW, Status.IN_PROGRESS, Status.WAITING)
+
+    client = models.ForeignKey(
+        Client,
         related_name="tasks",
         on_delete=models.CASCADE,
         verbose_name="Клієнт",
+    )
+    contact = models.ForeignKey(
+        "crm.Contact",
+        related_name="tasks",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Контакт",
+    )
+    order = models.ForeignKey(
+        "crm.Order",
+        related_name="tasks",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Замовлення",
     )
 
     title = models.CharField("Назва задачі", max_length=255)
@@ -413,10 +451,12 @@ class Task(models.Model):
 
     date = models.DateField("Дата задачі", db_index=True)
 
-    status = models.BooleanField(
-        "Виконано",
-        default=False,
-        help_text="Позначає, чи задача виконана",
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.NEW,
+        db_index=True,
     )
 
     comment = models.TextField("Коментар", blank=True)
@@ -429,4 +469,41 @@ class Task(models.Model):
         ordering = ["date", "id"]
 
     def __str__(self):
-        return f"{self.title} ({'виконано' if self.status else 'не виконано'})"
+        return f"{self.title} ({self.get_status_display()})"
+
+    @property
+    def is_done(self):
+        return self.status == self.Status.DONE
+
+    @property
+    def is_open(self):
+        return self.status in self.OPEN_STATUSES
+
+    def clean(self):
+        super().clean()
+
+        if self.order_id and not self.contact_id:
+            self.contact = self.order.contact
+
+        if not self.client_id and self.contact_id:
+            self.client = self.contact.client
+        if not self.client_id and self.order_id:
+            self.client = self.order.contact.client
+
+        if not self.client_id:
+            raise ValidationError({"client": "Задача має бути прив’язана до клієнта."})
+
+        if self.contact_id and self.contact.client_id != self.client_id:
+            raise ValidationError({"contact": "Контакт має належати вибраному клієнту."})
+
+        if self.order_id and self.order.contact.client_id != self.client_id:
+            raise ValidationError({"order": "Замовлення має належати вибраному клієнту."})
+
+    def save(self, *args, **kwargs):
+        if self.order_id and not self.contact_id:
+            self.contact = self.order.contact
+        if not self.client_id and self.contact_id:
+            self.client = self.contact.client
+        if not self.client_id and self.order_id:
+            self.client = self.order.contact.client
+        super().save(*args, **kwargs)

@@ -20,7 +20,9 @@ from .views import (
     products_list,
     task_create,
     task_delete,
+    task_status_update,
     task_update,
+    tasks_kanban,
     tasks_list,
 )
 
@@ -40,7 +42,9 @@ urlpatterns = [
     path("crm/orders/<int:order_id>/edit/", order_update, name="crm_order_update"),
     path("crm/orders/<int:order_id>/delete/", order_delete, name="crm_order_delete"),
     path("crm/tasks/", tasks_list, name="crm_tasks"),
+    path("crm/tasks/kanban/", tasks_kanban, name="crm_tasks_kanban"),
     path("crm/tasks/new/", task_create, name="crm_task_create"),
+    path("crm/tasks/<int:task_id>/status/", task_status_update, name="crm_task_status_update"),
     path("crm/tasks/<int:task_id>/edit/", task_update, name="crm_task_update"),
     path("crm/tasks/<int:task_id>/delete/", task_delete, name="crm_task_delete"),
     path("crm/products/", products_list, name="crm_products"),

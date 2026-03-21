@@ -5,78 +5,109 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Вхід</title>
     <style>
+        :root {
+            --bg: #eef1f4;
+            --surface: #ffffff;
+            --surface-muted: #f6f7f9;
+            --ink: #1f2933;
+            --muted: #667085;
+            --line: #d8dde5;
+            --accent: #1f5f57;
+            --danger: #b42318;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             margin: 0;
             min-height: 100vh;
             display: grid;
             place-items: center;
-            background:
-                radial-gradient(circle at top right, rgba(100, 57, 36, 0.18), transparent 28%),
-                linear-gradient(180deg, #f3efe6 0%, #ece6db 100%);
-            font-family: Georgia, "Times New Roman", serif;
-            color: #1f2a30;
+            padding: 16px;
+            background: var(--bg);
+            color: var(--ink);
+            font-family: "Segoe UI", "Aptos", sans-serif;
+            line-height: 1.4;
         }
 
-        .card {
+        .login-shell {
             width: min(100%, 420px);
-            margin: 20px;
-            padding: 28px;
-            border-radius: 24px;
-            background: rgba(255, 253, 249, 0.96);
-            border: 1px solid #d9d0c3;
-            box-shadow: 0 14px 40px rgba(31, 42, 48, 0.12);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--surface);
+            padding: 16px;
+        }
+
+        .eyebrow {
+            margin: 0 0 4px;
+            color: var(--muted);
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
         }
 
         h1 {
-            margin: 0 0 8px;
-            font-size: 34px;
+            margin: 0 0 6px;
+            font-size: 22px;
+            line-height: 1.2;
         }
 
         p {
-            color: #5f6b72;
+            margin: 0 0 14px;
+            color: var(--muted);
+            font-size: 13px;
         }
 
         form {
             display: grid;
-            gap: 14px;
+            gap: 12px;
         }
 
         label {
             display: block;
             margin-bottom: 6px;
-            font-size: 14px;
+            color: var(--muted);
+            font-size: 13px;
         }
 
         input {
             width: 100%;
-            padding: 12px 14px;
-            border-radius: 14px;
-            border: 1px solid #cfc4b5;
-            background: #fff;
+            min-height: 36px;
+            padding: 6px 9px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--surface);
+            color: var(--ink);
             font: inherit;
         }
 
         button {
-            padding: 12px 16px;
-            border: 0;
-            border-radius: 14px;
-            background: #8b5e34;
-            color: #fff;
-            font: inherit;
+            min-height: 36px;
+            padding: 6px 10px;
+            border: 1px solid var(--accent);
+            border-radius: 6px;
+            background: var(--accent);
+            color: #ffffff;
             cursor: pointer;
+            font: inherit;
         }
 
-        ul {
-            margin: 0;
+        ul,
+        .errorlist {
+            margin: 6px 0 0;
             padding-left: 18px;
-            color: #b63d2b;
+            color: var(--danger);
+            font-size: 13px;
         }
     </style>
 </head>
 <body>
-<div class="card">
+<div class="login-shell">
+    <p class="eyebrow">MK CRM</p>
     <h1>Вхід</h1>
-    <p>Увійдіть за email або логіном, щоб відкрити персональний кабінет.</p>
+    <p>Увійдіть за email або логіном, щоб відкрити робочі модулі системи.</p>
     <form method="post">
         {% csrf_token %}
         {% if form.non_field_errors %}

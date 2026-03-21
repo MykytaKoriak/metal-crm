@@ -3,7 +3,7 @@
 {% block title %}Замовлення{% endblock %}
 {% block eyebrow %}CRM orders{% endblock %}
 {% block hero_title %}Замовлення{% endblock %}
-{% block hero_text %}Окрема CRM-сторінка замовлень у новому інтерфейсі, зі статусами, менеджерами, доставкою, оплатою та власними CRUD-діями.{% endblock %}
+{% block hero_text %}Реєстр замовлень зі статусами, строками та відповідальними.{% endblock %}
 
 {% block hero_stats %}
     <div class="chip">
@@ -69,56 +69,58 @@
         <span class="eyebrow">Orders</span>
         <h2>Список замовлень</h2>
         {% if orders %}
-            <table class="table">
-                <thead>
-                <tr>
-                    <th>Замовлення</th>
-                    <th>Клієнт</th>
-                    <th>Менеджер</th>
-                    <th>Статус</th>
-                    <th>Дедлайн</th>
-                    <th>Сума</th>
-                    <th>Дії</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for order in orders %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
                     <tr>
-                        <td>
-                            {% if order.edit_url %}
-                                <a href="{{ order.edit_url }}">{{ order.title|default:"Без назви" }}</a>
-                            {% else %}
-                                {{ order.title|default:"Без назви" }}
-                            {% endif %}
-                            {% if order.is_overdue %}
-                                <span class="pill overdue">прострочено</span>
-                            {% endif %}
-                            {% if order.delivery_summary %}
-                                <p class="meta-line">{{ order.delivery_summary }}</p>
-                            {% endif %}
-                            {% if order.payment_summary %}
-                                <p class="meta-line">{{ order.payment_summary }}</p>
-                            {% endif %}
-                        </td>
-                        <td><a href="{{ order.client_url }}">{{ order.contact.client.name }}</a></td>
-                        <td>{% if order.manager %}{{ order.manager.email|default:order.manager.username }}{% else %}—{% endif %}</td>
-                        <td>{{ order.get_status_display }}</td>
-                        <td>{{ order.deadline|date:"d.m.Y"|default:"—" }}</td>
-                        <td>{{ order.items_total|floatformat:2 }}</td>
-                        <td>
-                            <div class="link-row">
-                                {% if order.edit_url %}
-                                    <a href="{{ order.edit_url }}">Редагувати</a>
-                                {% endif %}
-                                {% if order.delete_url %}
-                                    <a href="{{ order.delete_url }}">Видалити</a>
-                                {% endif %}
-                            </div>
-                        </td>
+                        <th>Замовлення</th>
+                        <th>Клієнт</th>
+                        <th>Менеджер</th>
+                        <th>Статус</th>
+                        <th>Дедлайн</th>
+                        <th>Сума</th>
+                        <th>Дії</th>
                     </tr>
-                {% endfor %}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                    {% for order in orders %}
+                        <tr>
+                            <td>
+                                {% if order.edit_url %}
+                                    <a href="{{ order.edit_url }}">{{ order.title|default:"Без назви" }}</a>
+                                {% else %}
+                                    {{ order.title|default:"Без назви" }}
+                                {% endif %}
+                                {% if order.is_overdue %}
+                                    <span class="pill overdue">прострочено</span>
+                                {% endif %}
+                                {% if order.delivery_summary %}
+                                    <p class="meta-line">{{ order.delivery_summary }}</p>
+                                {% endif %}
+                                {% if order.payment_summary %}
+                                    <p class="meta-line">{{ order.payment_summary }}</p>
+                                {% endif %}
+                            </td>
+                            <td><a href="{{ order.client_url }}">{{ order.contact.client.name }}</a></td>
+                            <td>{% if order.manager %}{{ order.manager.email|default:order.manager.username }}{% else %}—{% endif %}</td>
+                            <td>{{ order.get_status_display }}</td>
+                            <td>{{ order.deadline|date:"d.m.Y"|default:"—" }}</td>
+                            <td>{{ order.items_total|floatformat:2 }}</td>
+                            <td>
+                                <div class="link-row">
+                                    {% if order.edit_url %}
+                                        <a href="{{ order.edit_url }}">Редагувати</a>
+                                    {% endif %}
+                                    {% if order.delete_url %}
+                                        <a href="{{ order.delete_url }}">Видалити</a>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         {% else %}
             <p class="empty">Замовлення за цим фільтром не знайдено.</p>
         {% endif %}

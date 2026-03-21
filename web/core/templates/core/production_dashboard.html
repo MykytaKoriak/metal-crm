@@ -3,7 +3,7 @@
 {% block title %}Виробництво{% endblock %}
 {% block eyebrow %}Production dashboard{% endblock %}
 {% block hero_title %}Календар і виробнича черга{% endblock %}
-{% block hero_text %}Дашборд показує календарне навантаження ресурсів і окремий список активних виробничих етапів по позиціях замовлень.{% endblock %}
+{% block hero_text %}Календар ресурсів, черга етапів і прострочені замовлення.{% endblock %}
 
 {% block hero_stats %}
     <div class="chip">
@@ -82,28 +82,30 @@
         <span class="eyebrow">Top load</span>
         <h2>Найзавантаженіші ресурси</h2>
         {% if production.top_resources %}
-            <table class="table">
-                <thead>
-                <tr>
-                    <th>Ресурс</th>
-                    <th>Тип</th>
-                    <th>Доба</th>
-                    <th>Тиждень</th>
-                    <th>Статус</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for row in production.top_resources %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
                     <tr>
-                        <td><a href="{% url row.detail_url_name row.id %}">{{ row.name }}</a></td>
-                        <td>{{ row.type_label }}</td>
-                        <td>{{ row.today_load }}%</td>
-                        <td>{{ row.week_load }}%</td>
-                        <td><span class="pill {{ row.status }}">{{ row.status }}</span></td>
+                        <th>Ресурс</th>
+                        <th>Тип</th>
+                        <th>Доба</th>
+                        <th>Тиждень</th>
+                        <th>Статус</th>
                     </tr>
-                {% endfor %}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                    {% for row in production.top_resources %}
+                        <tr>
+                            <td><a href="{% url row.detail_url_name row.id %}">{{ row.name }}</a></td>
+                            <td>{{ row.type_label }}</td>
+                            <td>{{ row.today_load }}%</td>
+                            <td>{{ row.week_load }}%</td>
+                            <td><span class="pill {{ row.status }}">{{ row.status }}</span></td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         {% else %}
             <p class="empty">Ресурси виробництва ще не створені.</p>
         {% endif %}

@@ -1,38 +1,56 @@
 {% extends "admin/base_site.html" %}
-{% load static %}
 
 {% block content %}
-<h1>Календар слотів виробництва</h1>
+<style>
+    .calendar-shell {
+        max-width: 1360px;
+        padding: 8px 0 24px;
+    }
 
-<div id="calendar"></div>
+    .calendar-shell h1 {
+        margin-bottom: 12px;
+    }
 
-<script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.19/index.global.min.js'></script>
+    .calendar-panel {
+        padding: 12px;
+        border: 1px solid #d6dfe3;
+        border-radius: 8px;
+        background: #fff;
+    }
 
+    #calendar {
+        background: #fff;
+        border-radius: 6px;
+    }
+</style>
+
+<div class="calendar-shell">
+    <h1>Календар слотів виробництва</h1>
+    <div class="calendar-panel">
+        <div id="calendar"></div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.19/index.global.min.js"></script>
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-  var calendarEl = document.getElementById('calendar');
+document.addEventListener("DOMContentLoaded", function() {
+  var calendarEl = document.getElementById("calendar");
 
   var calendar = new FullCalendar.Calendar(calendarEl, {
-    initialView: 'timeGridWeek',        // тижневий календар як у Google
-    locale: 'uk',
+    initialView: "timeGridWeek",
+    locale: "uk",
     firstDay: 1,
     nowIndicator: true,
-    slotMinTime: '00:00:00',
-    slotMaxTime: '24:00:00',
-    height: 'auto',
-      timeZone: 'Europe/Kyiv',
-
-
+    slotMinTime: "00:00:00",
+    slotMaxTime: "24:00:00",
+    height: "auto",
+    timeZone: "Europe/Kyiv",
     headerToolbar: {
-      left: 'prev,next today',
-      center: 'title',
-      right: 'dayGridMonth,timeGridWeek,timeGridDay'
+      left: "prev,next today",
+      center: "title",
+      right: "dayGridMonth,timeGridWeek,timeGridDay"
     },
-
-    // забираємо події з нашого Django view
     events: "{% url 'production_slot_events' %}",
-
-    // дозволяємо виділяти діапазон часу
     selectable: {{ can_add_slots|yesno:"true,false" }},
     select: function(info) {
       if (!{{ can_add_slots|yesno:"true,false" }}) {
@@ -40,34 +58,22 @@ document.addEventListener('DOMContentLoaded', function() {
       }
       const start = info.startStr;
       const end = info.endStr;
-
-      // переходимо на стандартну admin-форму створення слота,
-      // передаючи start/end у GET
       const url = `/admin/manufacture/productionslot/add/?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
       window.location.href = url;
     },
-
-    // клік по вже існуючому слоту -> редагування
     eventClick: function(info) {
       if (!{{ can_view_slots|yesno:"true,false" }}) {
+        return;
+      }
+      if (info.event.extendedProps.kind !== "slot") {
         return;
       }
       const url = `/admin/manufacture/productionslot/${info.event.id}/change/`;
       window.location.href = url;
     }
-
   });
 
   calendar.render();
 });
 </script>
-
-<style>
-  #calendar {
-    background: #fff;
-    padding: 10px;
-    border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  }
-</style>
 {% endblock %}

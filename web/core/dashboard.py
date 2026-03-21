@@ -182,7 +182,7 @@ def get_sales_dashboard_context(user):
     today = timezone.localdate()
     my_tasks = (
         Task.objects.filter(assigned_to=user)
-        .select_related("contact", "contact__client", "assigned_by", "assigned_to")
+        .select_related("client", "contact", "order", "assigned_by", "assigned_to")
         .order_by("date", "id")
     )
     my_orders = (
@@ -193,33 +193,34 @@ def get_sales_dashboard_context(user):
 
     task_board = [
         {
-            "key": "today",
-            "title": "На сьогодні",
-            "items": list(my_tasks.filter(status=False, date=today)[:10]),
+            "key": Task.Status.NEW,
+            "title": "Нові",
+            "items": list(my_tasks.filter(status=Task.Status.NEW)[:5]),
         },
         {
-            "key": "planned",
-            "title": "Заплановані",
-            "items": list(my_tasks.filter(status=False, date__gt=today)[:10]),
+            "key": Task.Status.IN_PROGRESS,
+            "title": "В роботі",
+            "items": list(my_tasks.filter(status=Task.Status.IN_PROGRESS)[:5]),
         },
         {
-            "key": "overdue",
-            "title": "Прострочені",
-            "items": list(my_tasks.filter(status=False, date__lt=today)[:10]),
+            "key": Task.Status.WAITING,
+            "title": "Очікують",
+            "items": list(my_tasks.filter(status=Task.Status.WAITING)[:5]),
         },
         {
-            "key": "done",
+            "key": Task.Status.DONE,
             "title": "Виконано",
-            "items": list(my_tasks.filter(status=True)[:10]),
+            "items": list(my_tasks.filter(status=Task.Status.DONE)[:5]),
         },
     ]
 
     return {
         "task_board": task_board,
         "task_stats": {
-            "open_tasks": my_tasks.filter(status=False).count(),
-            "overdue_tasks": my_tasks.filter(status=False, date__lt=today).count(),
-            "done_tasks": my_tasks.filter(status=True).count(),
+            "open_tasks": my_tasks.exclude(status=Task.Status.DONE).count(),
+            "overdue_tasks": my_tasks.exclude(status=Task.Status.DONE).filter(date__lt=today).count(),
+            "done_tasks": my_tasks.filter(status=Task.Status.DONE).count(),
+            "waiting_tasks": my_tasks.filter(status=Task.Status.WAITING).count(),
         },
         "order_status_rows": get_order_status_rows(my_orders),
         "orders_count": my_orders.count(),
