@@ -1,114 +1,467 @@
 {% extends "core/dashboard_base.html" %}
 
 {% block title %}Виробництво{% endblock %}
-{% block eyebrow %}Production dashboard{% endblock %}
-{% block hero_title %}Календар і виробнича черга{% endblock %}
-{% block hero_text %}Календар ресурсів, черга етапів і прострочені замовлення.{% endblock %}
+{% block eyebrow %}Production workspace{% endblock %}
+{% block hero_title %}Робоче місце виробництва{% endblock %}
+{% block hero_text %}Черга етапів, календар ресурсів, перегруз, вільні вікна та прострочені роботи в одному екрані.{% endblock %}
 
 {% block hero_stats %}
     <div class="chip">
-        <strong>{{ production.summary.resource_count }}</strong>
-        <span>Ресурсів</span>
+        <strong>{{ production_summary.queue_count }}</strong>
+        <span>Етапів у черзі</span>
     </div>
     <div class="chip">
-        <strong>{{ production.summary.today_load }}%</strong>
-        <span>Завантаження сьогодні</span>
+        <strong>{{ production_summary.in_progress_count }}</strong>
+        <span>В роботі</span>
+    </div>
+    <div class="chip">
+        <strong>{{ production_summary.overdue_stage_count }}</strong>
+        <span>Прострочених етапів</span>
+    </div>
+    <div class="chip">
+        <strong>{{ production_summary.free_window_count }}</strong>
+        <span>Вільних вікон</span>
     </div>
     <div class="chip">
         <strong>{{ production.summary.week_load }}%</strong>
-        <span>План на 7 днів</span>
-    </div>
-    <div class="chip">
-        <strong>{{ overdue_orders|length }}</strong>
-        <span>Прострочені замовлення</span>
+        <span>Завантаження 7 днів</span>
     </div>
 {% endblock %}
 
 {% block content %}
+    <style>
+        .toolbar-form,
+        .inline-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: end;
+        }
+
+        .toolbar-form {
+            margin-bottom: 8px;
+        }
+
+        .field-group {
+            display: grid;
+            gap: 4px;
+            min-width: 140px;
+        }
+
+        .field-group label {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .field-group input,
+        .field-group select {
+            min-height: 32px;
+            padding: 6px 8px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--surface);
+        }
+
+        .inline-actions {
+            min-width: 220px;
+        }
+
+        .inline-actions form {
+            margin: 0;
+        }
+
+        .inline-actions button,
+        .toolbar-form button,
+        .toolbar-form a {
+            min-height: 30px;
+            padding: 4px 8px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--surface-muted);
+            color: var(--ink);
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .inline-actions button.start {
+            border-color: #93c5aa;
+            color: #0f5132;
+            background: #ebf7ef;
+        }
+
+        .inline-actions button.done {
+            border-color: #90b7a8;
+            color: #14532d;
+            background: #eef8f2;
+        }
+
+        .inline-actions button.cancel {
+            border-color: #efb3ad;
+            color: #9f1c11;
+            background: #fff2f0;
+        }
+
+        .inline-actions button.block {
+            border-color: #e2c489;
+            color: #8a4b08;
+            background: #fff7e8;
+        }
+
+        .meta-stack {
+            display: grid;
+            gap: 3px;
+        }
+
+        .compact-table td {
+            vertical-align: top;
+        }
+
+        .status-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+
+        .status-strip .pill {
+            font-size: 11px;
+        }
+
+        #dashboard-calendar {
+            min-height: 560px;
+        }
+
+        @media (max-width: 960px) {
+            .inline-actions {
+                min-width: 0;
+            }
+        }
+    </style>
+
     <section class="panel">
-        <span class="eyebrow">Calendar</span>
-        <h2>Календар завантаженості верстатів</h2>
-        <p class="muted">Події беруться з production calendar і відкривають поточні детальні звіти по ресурсах.</p>
-        <div id="dashboard-calendar"></div>
+        <div class="panel-head">
+            <div>
+                <span class="eyebrow">Filters</span>
+                <h2>Фільтри виробництва</h2>
+            </div>
+            <div class="link-row">
+                <a href="{% url 'production_free_slot_report' %}?resource_kind={{ filters.resource_kind }}{% if filters.resource_id %}&resource_id={{ filters.resource_id }}{% endif %}">Звіт по вільних слотах</a>
+                <a href="{% url 'production_overdue_stage_report' %}?resource_kind={{ filters.resource_kind }}{% if filters.resource_id %}&resource_id={{ filters.resource_id }}{% endif %}">Звіт по прострочених етапах</a>
+                <a href="{% url 'machine_load_report' %}">Перегруз ресурсів</a>
+            </div>
+        </div>
+        <form method="get" class="toolbar-form">
+            <div class="field-group">
+                <label for="resource_kind">Тип ресурсу</label>
+                <select id="resource_kind" name="resource_kind">
+                    <option value="all"{% if filters.resource_kind == "all" %} selected{% endif %}>Усі ресурси</option>
+                    <option value="machine"{% if filters.resource_kind == "machine" %} selected{% endif %}>Верстати</option>
+                    <option value="work_unit"{% if filters.resource_kind == "work_unit" %} selected{% endif %}>Дільниці</option>
+                </select>
+            </div>
+            <div class="field-group">
+                <label for="resource_id">Ресурс</label>
+                <select id="resource_id" name="resource_id">
+                    <option value="">Усі</option>
+                    {% for resource in resource_choices %}
+                        <option value="{{ resource.id }}"{% if filters.resource_id == resource.id|stringformat:"s" %} selected{% endif %}>{{ resource.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field-group">
+                <label for="stage_status">Статус етапу</label>
+                <select id="stage_status" name="stage_status">
+                    <option value="">Активні</option>
+                    {% for value, label in stage_status_choices %}
+                        <option value="{{ value }}"{% if filters.stage_status == value %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field-group">
+                <label for="only_overdue">Режим</label>
+                <select id="only_overdue" name="only_overdue">
+                    <option value="0"{% if not filters.only_overdue %} selected{% endif %}>Уся черга</option>
+                    <option value="1"{% if filters.only_overdue %} selected{% endif %}>Лише прострочені</option>
+                </select>
+            </div>
+            <button type="submit">Застосувати</button>
+            <a href="{% url 'production_dashboard' %}">Скинути</a>
+        </form>
     </section>
 
-    <section class="section-grid two-up">
+    <section class="section-grid three-up">
         <article class="panel">
-            <span class="eyebrow">Active queue</span>
-            <h2>Активні виробничі етапи</h2>
-            {% if active_queue %}
-                <div class="mini-list">
-                    {% for stage in active_queue %}
-                        <article class="item-card">
-                            <h3>{{ stage.order_item.product.name }} · {{ stage.get_stage_type_display }}</h3>
-                            <p class="muted">{{ stage.dashboard_state }}{% if stage.dashboard_start %} · {{ stage.dashboard_start|date:"d.m.Y H:i" }}{% endif %}{% if stage.dashboard_end %} - {{ stage.dashboard_end|date:"d.m.Y H:i" }}{% endif %}</p>
-                            <p>{{ stage.dashboard_order.title|default:"Без назви" }}</p>
-                            {% if stage.dashboard_resource %}
-                                <p>{{ stage.dashboard_resource }}</p>
-                            {% endif %}
-                            <p>{{ stage.dashboard_order.contact.full_name }}{% if stage.dashboard_order.contact.client %} / {{ stage.dashboard_order.contact.client.name }}{% endif %}</p>
-                            {% if stage.responsible %}
-                                <p class="muted">Відповідальний: {{ stage.responsible.email|default:stage.responsible.username }}</p>
-                            {% endif %}
-                        </article>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <p class="empty">Активних етапів зараз немає.</p>
-            {% endif %}
+            <span class="eyebrow">Queue</span>
+            <h2>Стан черги</h2>
+            <div class="metrics">
+                <div class="metric"><strong>{{ production_summary.queue_count }}</strong><span>Усі етапи</span></div>
+                <div class="metric"><strong>{{ production_summary.in_progress_count }}</strong><span>В роботі</span></div>
+                <div class="metric"><strong>{{ production_summary.critical_resources }}</strong><span>Перегружені ресурси</span></div>
+            </div>
         </article>
-
         <article class="panel">
-            <span class="eyebrow">Overdue</span>
-            <h2>Прострочені замовлення</h2>
-            {% if overdue_orders %}
-                <div class="mini-list">
-                    {% for order in overdue_orders %}
-                        <article class="item-card">
-                            <h3>{{ order.title|default:"Без назви" }}</h3>
-                            <p class="muted">Дедлайн: {{ order.deadline|date:"d.m.Y" }}</p>
-                            <p>{{ order.contact.full_name }}{% if order.contact.client %} / {{ order.contact.client.name }}{% endif %}</p>
-                            <p class="muted">{{ order.get_status_display }}</p>
-                        </article>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <p class="empty">Прострочених замовлень немає.</p>
-            {% endif %}
+            <span class="eyebrow">Deadlines</span>
+            <h2>Проблемні зони</h2>
+            <div class="metrics">
+                <div class="metric"><strong>{{ production_summary.overdue_stage_count }}</strong><span>Прострочені етапи</span></div>
+                <div class="metric"><strong>{{ overdue_orders|length }}</strong><span>Прострочені замовлення</span></div>
+                <div class="metric"><strong>{{ production.summary.scheduled_today }}</strong><span>Слотів сьогодні</span></div>
+            </div>
+        </article>
+        <article class="panel">
+            <span class="eyebrow">Capacity</span>
+            <h2>Резерв по ресурсах</h2>
+            <div class="metrics">
+                <div class="metric"><strong>{{ production_summary.free_window_count }}</strong><span>Вікон 1+ година</span></div>
+                <div class="metric"><strong>{{ production.summary.today_load }}%</strong><span>Сьогодні</span></div>
+                <div class="metric"><strong>{{ production.summary.week_load }}%</strong><span>7 днів</span></div>
+            </div>
         </article>
     </section>
 
     <section class="panel">
-        <span class="eyebrow">Top load</span>
-        <h2>Найзавантаженіші ресурси</h2>
-        {% if production.top_resources %}
+        <div class="panel-head">
+            <div>
+                <span class="eyebrow">Execution queue</span>
+                <h2>Робоча черга етапів</h2>
+            </div>
+        </div>
+        {% if active_queue %}
             <div class="table-wrap">
-                <table class="table">
+                <table class="table compact-table">
                     <thead>
                     <tr>
+                        <th>Етап</th>
+                        <th>Замовлення</th>
+                        <th>Клієнт</th>
                         <th>Ресурс</th>
-                        <th>Тип</th>
-                        <th>Доба</th>
-                        <th>Тиждень</th>
+                        <th>План</th>
+                        <th>Слот</th>
                         <th>Статус</th>
+                        <th>Дія</th>
                     </tr>
                     </thead>
                     <tbody>
-                    {% for row in production.top_resources %}
+                    {% for row in active_queue %}
                         <tr>
-                            <td><a href="{% url row.detail_url_name row.id %}">{{ row.name }}</a></td>
-                            <td>{{ row.type_label }}</td>
-                            <td>{{ row.today_load }}%</td>
-                            <td>{{ row.week_load }}%</td>
-                            <td><span class="pill {{ row.status }}">{{ row.status }}</span></td>
+                            <td>
+                                <div class="meta-stack">
+                                    <strong>{{ row.stage.order_item.product.name }}</strong>
+                                    <span>{{ row.stage.get_stage_type_display }}</span>
+                                    <span class="muted">{{ row.purpose }}</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="meta-stack">
+                                    <strong>{{ row.stage.order_item.order.title|default:"Без назви" }}</strong>
+                                    <span class="muted">{{ row.stage.order_item.order.get_status_display }}</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="meta-stack">
+                                    <strong>{{ row.stage.order_item.order.contact.full_name }}</strong>
+                                    {% if row.stage.order_item.order.contact.client %}
+                                        <span class="muted">{{ row.stage.order_item.order.contact.client.name }}</span>
+                                    {% endif %}
+                                    {% if row.stage.responsible %}
+                                        <span class="muted">Відповідальний: {{ row.stage.responsible.email|default:row.stage.responsible.username }}</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="meta-stack">
+                                    <strong>{{ row.resource_label|default:"Не призначено" }}</strong>
+                                    {% if row.slot %}
+                                        <span class="muted">{{ row.slot.get_planning_source_display }} / {{ row.slot.get_slot_type_display }}</span>
+                                        <span class="muted">{{ row.slot.get_operation_type_display }}</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="meta-stack">
+                                    <span>{% if row.planned_start %}{{ row.planned_start|date:"d.m.Y H:i" }}{% else %}—{% endif %}</span>
+                                    <span>{% if row.planned_end %}{{ row.planned_end|date:"d.m.Y H:i" }}{% else %}—{% endif %}</span>
+                                    {% if row.is_overdue %}
+                                        <span class="muted">Просрочка: {{ row.overdue_hours }} год</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                {% if row.slot %}
+                                    <div class="status-strip">
+                                        <span class="pill">{{ row.slot.get_planning_mode_display }}</span>
+                                        {% if row.slot.is_locked %}<span class="pill warning">Locked</span>{% endif %}
+                                        {% if row.slot.dispatcher_comment %}<span class="pill">{{ row.slot.dispatcher_comment }}</span>{% endif %}
+                                    </div>
+                                {% else %}
+                                    <span class="muted">Без слота</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="status-strip">
+                                    <span class="pill">{{ row.stage.get_status_display }}</span>
+                                    {% if row.is_overdue %}<span class="pill danger">Overdue</span>{% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="inline-actions">
+                                    <form method="post" action="{% url 'production_stage_status_update' row.stage.id %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                        <button class="start" type="submit" name="status" value="in_progress">Start</button>
+                                    </form>
+                                    <form method="post" action="{% url 'production_stage_status_update' row.stage.id %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                        <button class="done" type="submit" name="status" value="done">Done</button>
+                                    </form>
+                                    <form method="post" action="{% url 'production_stage_status_update' row.stage.id %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                        <button class="block" type="submit" name="status" value="blocked">Block</button>
+                                    </form>
+                                    <form method="post" action="{% url 'production_stage_status_update' row.stage.id %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                        <button class="cancel" type="submit" name="status" value="cancelled">Cancel</button>
+                                    </form>
+                                </div>
+                            </td>
                         </tr>
                     {% endfor %}
                     </tbody>
                 </table>
             </div>
         {% else %}
-            <p class="empty">Ресурси виробництва ще не створені.</p>
+            <p class="empty">За поточними фільтрами активних етапів немає.</p>
         {% endif %}
+    </section>
+
+    <section class="section-grid two-up">
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <span class="eyebrow">Calendar</span>
+                    <h2>Календар ресурсів</h2>
+                </div>
+            </div>
+            <div id="dashboard-calendar"></div>
+        </article>
+
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <span class="eyebrow">Load</span>
+                    <h2>Найбільш завантажені ресурси</h2>
+                </div>
+            </div>
+            {% if production.top_resources %}
+                <div class="table-wrap">
+                    <table class="table compact-table">
+                        <thead>
+                        <tr>
+                            <th>Ресурс</th>
+                            <th>Тип</th>
+                            <th>Сьогодні</th>
+                            <th>7 днів</th>
+                            <th>Статус</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in production.top_resources %}
+                            <tr>
+                                <td><a href="{% url row.detail_url_name row.id %}">{{ row.name }}</a></td>
+                                <td>{{ row.type_label }}</td>
+                                <td>{{ row.today_load }}%</td>
+                                <td>{{ row.week_load }}%</td>
+                                <td><span class="pill {{ row.status }}">{{ row.status }}</span></td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty">Ресурси ще не створені.</p>
+            {% endif %}
+        </article>
+    </section>
+
+    <section class="section-grid two-up">
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <span class="eyebrow">Free windows</span>
+                    <h2>Найближчі вільні вікна</h2>
+                </div>
+                <a class="button-link" href="{% url 'production_free_slot_report' %}?resource_kind={{ filters.resource_kind }}{% if filters.resource_id %}&resource_id={{ filters.resource_id }}{% endif %}">Повний звіт</a>
+            </div>
+            {% if free_slot_rows %}
+                <div class="table-wrap">
+                    <table class="table compact-table">
+                        <thead>
+                        <tr>
+                            <th>Ресурс</th>
+                            <th>Дата</th>
+                            <th>Вікно</th>
+                            <th>Тривалість</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in free_slot_rows %}
+                            <tr>
+                                <td>{{ row.resource_label }}</td>
+                                <td>{{ row.date|date:"d.m.Y" }}</td>
+                                <td>{{ row.start|time:"H:i" }} - {{ row.end|time:"H:i" }}</td>
+                                <td>{{ row.duration_hours }} год</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty">Вільних вікон за поточним фільтром немає.</p>
+            {% endif %}
+        </article>
+
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <span class="eyebrow">Overdue stages</span>
+                    <h2>Прострочені етапи</h2>
+                </div>
+                <a class="button-link" href="{% url 'production_overdue_stage_report' %}?resource_kind={{ filters.resource_kind }}{% if filters.resource_id %}&resource_id={{ filters.resource_id }}{% endif %}">Повний звіт</a>
+            </div>
+            {% if overdue_stage_rows %}
+                <div class="table-wrap">
+                    <table class="table compact-table">
+                        <thead>
+                        <tr>
+                            <th>Етап</th>
+                            <th>Ресурс</th>
+                            <th>Планове завершення</th>
+                            <th>Просрочка</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in overdue_stage_rows %}
+                            <tr>
+                                <td>
+                                    <div class="meta-stack">
+                                        <strong>{{ row.stage.order_item.product.name }}</strong>
+                                        <span>{{ row.stage.get_stage_type_display }}</span>
+                                    </div>
+                                </td>
+                                <td>{{ row.resource_label|default:"Не призначено" }}</td>
+                                <td>{% if row.planned_end %}{{ row.planned_end|date:"d.m.Y H:i" }}{% else %}—{% endif %}</td>
+                                <td>{{ row.overdue_hours }} год</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty">Прострочених етапів немає.</p>
+            {% endif %}
+        </article>
     </section>
 {% endblock %}
 
@@ -121,21 +474,22 @@
                 return;
             }
 
+            var eventsUrl = "{% url 'production_slot_events' %}?resource_kind={{ filters.resource_kind }}{% if filters.resource_id %}&resource_id={{ filters.resource_id }}{% endif %}";
             var calendar = new FullCalendar.Calendar(calendarEl, {
                 initialView: "timeGridWeek",
                 locale: "uk",
                 firstDay: 1,
                 nowIndicator: true,
                 height: "auto",
-                slotMinTime: "00:00:00",
-                slotMaxTime: "24:00:00",
+                slotMinTime: "06:00:00",
+                slotMaxTime: "22:00:00",
                 timeZone: "Europe/Kyiv",
                 headerToolbar: {
                     left: "prev,next today",
                     center: "title",
                     right: "dayGridMonth,timeGridWeek,timeGridDay"
                 },
-                events: "{% url 'production_slot_events' %}"
+                events: eventsUrl
             });
 
             calendar.render();

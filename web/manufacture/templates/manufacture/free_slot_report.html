@@ -1,0 +1,135 @@
+{% extends "core/dashboard_base.html" %}
+
+{% block title %}Вільні слоти{% endblock %}
+{% block eyebrow %}Production report{% endblock %}
+{% block hero_title %}Звіт по вільних слотах{% endblock %}
+{% block hero_text %}Вільні робочі вікна по ресурсах для ручної дозагрузки виробництва.{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ summary.window_count }}</strong>
+        <span>Вікон</span>
+    </div>
+    <div class="chip">
+        <strong>{{ summary.total_hours }}</strong>
+        <span>Годин резерву</span>
+    </div>
+    <div class="chip">
+        <strong>{{ filters.days }}</strong>
+        <span>Днів у горизонті</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <style>
+        .toolbar-form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: end;
+            margin-bottom: 8px;
+        }
+
+        .field-group {
+            display: grid;
+            gap: 4px;
+            min-width: 140px;
+        }
+
+        .field-group label {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .field-group input,
+        .field-group select {
+            min-height: 32px;
+            padding: 6px 8px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--surface);
+        }
+    </style>
+
+    <section class="panel">
+        <form method="get" class="toolbar-form">
+            <div class="field-group">
+                <label for="resource_kind">Тип ресурсу</label>
+                <select id="resource_kind" name="resource_kind">
+                    <option value="all"{% if filters.resource_kind == "all" %} selected{% endif %}>Усі ресурси</option>
+                    <option value="machine"{% if filters.resource_kind == "machine" %} selected{% endif %}>Верстати</option>
+                    <option value="work_unit"{% if filters.resource_kind == "work_unit" %} selected{% endif %}>Дільниці</option>
+                </select>
+            </div>
+            <div class="field-group">
+                <label for="resource_id">Ресурс</label>
+                <select id="resource_id" name="resource_id">
+                    <option value="">Усі</option>
+                    {% for resource in resource_choices %}
+                        <option value="{{ resource.id }}"{% if filters.resource_id == resource.id|stringformat:"s" %} selected{% endif %}>{{ resource.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field-group">
+                <label for="date_from">Початок</label>
+                <input id="date_from" type="date" name="date_from" value="{{ filters.date_from|date:'Y-m-d' }}">
+            </div>
+            <div class="field-group">
+                <label for="days">Горизонт, днів</label>
+                <input id="days" type="number" name="days" min="1" max="31" value="{{ filters.days }}">
+            </div>
+            <div class="field-group">
+                <label for="min_hours">Мін. тривалість, год</label>
+                <input id="min_hours" type="number" name="min_hours" min="0" max="12" value="{{ filters.min_hours }}">
+            </div>
+            <div class="field-group">
+                <label for="active_only">Ресурси</label>
+                <select id="active_only" name="active_only">
+                    <option value="1"{% if filters.active_only %} selected{% endif %}>Лише активні</option>
+                    <option value="0"{% if not filters.active_only %} selected{% endif %}>Усі</option>
+                </select>
+            </div>
+            <button type="submit">Оновити</button>
+            <a class="button-link" href="{% url 'production_dashboard' %}">До workspace</a>
+        </form>
+    </section>
+
+    <section class="panel">
+        <div class="panel-head">
+            <div>
+                <span class="eyebrow">Free windows</span>
+                <h2>Вільні вікна з {{ report.start_date|date:"d.m.Y" }} по {{ report.end_date|date:"d.m.Y" }}</h2>
+            </div>
+        </div>
+        {% if rows %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Ресурс</th>
+                        <th>Тип</th>
+                        <th>Дата</th>
+                        <th>Початок</th>
+                        <th>Кінець</th>
+                        <th>Тривалість</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td>{{ row.resource_label }}</td>
+                            <td>{{ row.resource_kind_label }}</td>
+                            <td>{{ row.date|date:"d.m.Y" }}</td>
+                            <td>{{ row.start|time:"H:i" }}</td>
+                            <td>{{ row.end|time:"H:i" }}</td>
+                            <td>{{ row.duration_hours }} год</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="empty">Вільних вікон за вибраними параметрами не знайдено.</p>
+        {% endif %}
+    </section>
+{% endblock %}

@@ -139,6 +139,7 @@ class ProductionStage(models.Model):
         SCHEDULED = "scheduled", "Заплановано"
         IN_PROGRESS = "in_progress", "В роботі"
         BLOCKED = "blocked", "Заблоковано"
+        CANCELLED = "cancelled", "Скасовано"
         DONE = "done", "Завершено"
 
     order_item = models.ForeignKey(
@@ -199,9 +200,32 @@ class ProductionStage(models.Model):
 
 
 class ProductionSlot(models.Model):
+    class SlotType(models.TextChoices):
+        WORK = "work", "Робочий слот"
+        SETUP = "setup", "Налаштування"
+        TRANSFER = "transfer", "Переміщення"
+        BUFFER = "buffer", "Буфер / очікування"
+        RESERVATION = "reservation", "Резерв"
+        OTHER = "other", "Інше"
+
+    class OperationType(models.TextChoices):
+        INTAKE = ProductionStage.StageType.INTAKE, ProductionStage.StageType.INTAKE.label
+        PROCUREMENT = ProductionStage.StageType.PROCUREMENT, ProductionStage.StageType.PROCUREMENT.label
+        EXECUTION = ProductionStage.StageType.EXECUTION, ProductionStage.StageType.EXECUTION.label
+        PAINTING = ProductionStage.StageType.PAINTING, ProductionStage.StageType.PAINTING.label
+        READY_TO_SHIP = ProductionStage.StageType.READY_TO_SHIP, ProductionStage.StageType.READY_TO_SHIP.label
+        OTHER = "other", "Інша операція"
+
     class PlanningMode(models.TextChoices):
         AUTO = "auto", "Авто"
         MANUAL = "manual", "Ручний"
+
+    class PlanningSource(models.TextChoices):
+        PLANNER = "planner", "Автопланувальник"
+        DISPATCHER = "dispatcher", "Диспетчер"
+        ADMIN = "admin", "Admin"
+        SYSTEM = "system", "Система"
+        SEED = "seed", "Demo seed"
 
     order = models.ForeignKey(
         "crm.Order",
@@ -216,6 +240,20 @@ class ProductionSlot(models.Model):
         null=True,
         blank=True,
         verbose_name="Етап",
+    )
+    slot_type = models.CharField(
+        "Тип слота",
+        max_length=20,
+        choices=SlotType.choices,
+        default=SlotType.WORK,
+        db_index=True,
+    )
+    operation_type = models.CharField(
+        "Тип операції",
+        max_length=32,
+        choices=OperationType.choices,
+        default=OperationType.OTHER,
+        db_index=True,
     )
     machine = models.ForeignKey(
         Machine,
@@ -242,12 +280,21 @@ class ProductionSlot(models.Model):
         default=PlanningMode.AUTO,
         db_index=True,
     )
+    planning_source = models.CharField(
+        "Джерело планування",
+        max_length=16,
+        choices=PlanningSource.choices,
+        default=PlanningSource.SYSTEM,
+        db_index=True,
+    )
     is_locked = models.BooleanField(
         "Зафіксовано вручну",
         default=False,
         help_text="Зафіксований слот не буде пересунуто автопланувальником.",
     )
-    comment = models.CharField("Коментар", max_length=500, blank=True)
+    purpose = models.CharField("Призначення", max_length=255, blank=True)
+    comment = models.CharField("Службовий коментар", max_length=500, blank=True)
+    dispatcher_comment = models.CharField("Коментар диспетчера", max_length=500, blank=True)
 
     class Meta:
         verbose_name = "Слот виробництва"
@@ -257,12 +304,20 @@ class ProductionSlot(models.Model):
     def __str__(self):
         location = self.machine or self.work_unit
         if self.stage_id:
-            return f"{self.stage} – {location}"
-        return f"{self.order} – {location}"
+            return f"{self.stage} - {location}"
+        return f"{self.order} - {location}"
 
     @property
     def resource(self):
         return self.machine or self.work_unit
+
+    @property
+    def is_manual(self):
+        return self.planning_mode == self.PlanningMode.MANUAL or self.is_locked
+
+    @property
+    def is_automatic(self):
+        return self.planning_mode == self.PlanningMode.AUTO and not self.is_locked
 
     def clean(self):
         super().clean()
@@ -280,6 +335,11 @@ class ProductionSlot(models.Model):
     def save(self, *args, **kwargs):
         if self.stage_id and not self.order_id:
             self.order = self.stage.order_item.order
+        if self.stage_id and self.operation_type == self.OperationType.OTHER:
+            if self.stage.stage_type in dict(self.OperationType.choices):
+                self.operation_type = self.stage.stage_type
+        if not self.purpose and self.stage_id:
+            self.purpose = f"{self.stage.order_item.product.name} / {self.stage.get_stage_type_display()}"
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -401,4 +461,4 @@ class ProductionSlotChangeLog(models.Model):
         ordering = ["-created_at", "-id"]
 
     def __str__(self):
-        return f"{self.get_action_display()} / слот #{self.slot_reference or '—'}"
+        return f"{self.get_action_display()} / слот #{self.slot_reference or '-'}"

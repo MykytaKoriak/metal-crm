@@ -9,6 +9,12 @@ from django.utils import timezone
 
 from crm.models import Client, Order, OrderItem, Task
 from manufacture.models import Machine, ProductionSlot, ProductionStage, WorkUnit
+from manufacture.services import (
+    build_free_slot_report,
+    build_overdue_stage_report,
+    build_stage_row,
+    get_resource_catalog,
+)
 
 from .access import ROLE_GROUP_NAMES
 
@@ -236,21 +242,36 @@ def get_sales_dashboard_context(user):
     }
 
 
-def get_production_dashboard_context():
+def get_production_dashboard_context(request=None):
     now = timezone.now()
     today = timezone.localdate()
     production = get_production_load_context()
 
-    active_queue = list(
+    query = request.GET if request is not None else {}
+    resource_kind = query.get("resource_kind", "all")
+    if resource_kind not in {"all", "machine", "work_unit"}:
+        resource_kind = "all"
+    resource_id = query.get("resource_id", "").strip()
+    stage_status = query.get("stage_status", "").strip()
+    only_overdue = query.get("only_overdue") == "1"
+
+    queue_queryset = (
         ProductionStage.objects.select_related(
             "order_item",
+            "order_item__product",
             "order_item__order",
             "order_item__order__contact",
             "order_item__order__contact__client",
             "responsible",
         )
         .prefetch_related("slots__machine", "slots__work_unit")
-        .filter(
+        .order_by("planned_start", "sequence", "id")
+    )
+
+    if stage_status:
+        queue_queryset = queue_queryset.filter(status=stage_status)
+    else:
+        queue_queryset = queue_queryset.filter(
             Q(status__in=[
                 ProductionStage.Status.SCHEDULED,
                 ProductionStage.Status.IN_PROGRESS,
@@ -258,22 +279,43 @@ def get_production_dashboard_context():
             ])
             | Q(status=ProductionStage.Status.NEW, planned_start__isnull=False)
         )
-        .filter(Q(planned_end__isnull=True) | Q(planned_end__gte=now - timedelta(days=1)))
-        .order_by("planned_start", "sequence", "id")[:10]
+
+    queue_rows = []
+    for stage in queue_queryset[:80]:
+        row = build_stage_row(stage, now=now)
+        if resource_kind == "machine" and row["resource_kind"] != "machine":
+            continue
+        if resource_kind == "work_unit" and row["resource_kind"] != "work_unit":
+            continue
+        if resource_id and (not row["resource"] or str(row["resource"].pk) != resource_id):
+            continue
+        if only_overdue and not row["is_overdue"]:
+            continue
+        queue_rows.append(row)
+
+    queue_rows.sort(
+        key=lambda row: (
+            0 if row["stage"].status == ProductionStage.Status.IN_PROGRESS else 1,
+            0 if row["is_overdue"] else 1,
+            row["planned_start"] or now + timedelta(days=3650),
+            row["stage"].sequence,
+            row["stage"].pk,
+        )
     )
 
-    for stage in active_queue:
-        stage.dashboard_order = stage.order_item.order
-        stage.dashboard_state = stage.get_status_display()
-        stage.dashboard_slot = next(iter(stage.slots.all()), None)
-        if stage.dashboard_slot:
-            stage.dashboard_resource = stage.dashboard_slot.machine or stage.dashboard_slot.work_unit
-            stage.dashboard_start = stage.dashboard_slot.start_datetime or stage.planned_start
-            stage.dashboard_end = stage.dashboard_slot.end_datetime or stage.planned_end
-        else:
-            stage.dashboard_resource = None
-            stage.dashboard_start = stage.planned_start
-            stage.dashboard_end = stage.planned_end
+    overdue_stage_report = build_overdue_stage_report(
+        now=now,
+        resource_kind=resource_kind,
+        resource_id=resource_id or None,
+    )
+    free_slot_report = build_free_slot_report(
+        date_from=today,
+        days=5,
+        resource_kind=resource_kind,
+        resource_id=resource_id or None,
+        min_duration_minutes=60,
+        active_only=True,
+    )
 
     overdue_orders = list(
         Order.objects.filter(deadline__lt=today)
@@ -284,8 +326,30 @@ def get_production_dashboard_context():
 
     return {
         "production": production,
-        "active_queue": active_queue,
+        "active_queue": queue_rows[:20],
         "overdue_orders": overdue_orders,
+        "overdue_stage_rows": overdue_stage_report["rows"][:10],
+        "free_slot_rows": free_slot_report["rows"][:12],
+        "resource_choices": get_resource_catalog(
+            resource_kind=resource_kind if resource_kind != "all" else "all",
+            active_only=False,
+        ),
+        "stage_status_choices": ProductionStage.Status.choices,
+        "filters": {
+            "resource_kind": resource_kind,
+            "resource_id": resource_id,
+            "stage_status": stage_status,
+            "only_overdue": only_overdue,
+        },
+        "production_summary": {
+            "queue_count": len(queue_rows),
+            "in_progress_count": sum(
+                1 for row in queue_rows if row["stage"].status == ProductionStage.Status.IN_PROGRESS
+            ),
+            "overdue_stage_count": len(overdue_stage_report["rows"]),
+            "free_window_count": len(free_slot_report["rows"]),
+            "critical_resources": production["summary"]["critical_resources"],
+        },
     }
 
 

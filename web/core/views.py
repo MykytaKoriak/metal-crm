@@ -100,7 +100,7 @@ def sales_dashboard(request):
 @roles_required(UserProfile.Role.PRODUCTION)
 def production_dashboard(request):
     context = _dashboard_shell_context(request)
-    context.update(get_production_dashboard_context())
+    context.update(get_production_dashboard_context(request))
     return render(request, "core/production_dashboard.html", context)
 
 

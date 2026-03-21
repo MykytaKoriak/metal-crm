@@ -1,0 +1,121 @@
+{% extends "core/dashboard_base.html" %}
+
+{% block title %}Прострочені етапи{% endblock %}
+{% block eyebrow %}Production report{% endblock %}
+{% block hero_title %}Звіт по прострочених етапах{% endblock %}
+{% block hero_text %}Етапи, у яких зірваний плановий строк завершення або вони зависли в роботі.{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ summary.stage_count }}</strong>
+        <span>Етапів</span>
+    </div>
+    <div class="chip">
+        <strong>{{ summary.max_overdue_hours }}</strong>
+        <span>Макс. просрочка, год</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <style>
+        .toolbar-form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: end;
+            margin-bottom: 8px;
+        }
+
+        .field-group {
+            display: grid;
+            gap: 4px;
+            min-width: 160px;
+        }
+
+        .field-group label {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .field-group select {
+            min-height: 32px;
+            padding: 6px 8px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--surface);
+        }
+    </style>
+
+    <section class="panel">
+        <form method="get" class="toolbar-form">
+            <div class="field-group">
+                <label for="resource_kind">Тип ресурсу</label>
+                <select id="resource_kind" name="resource_kind">
+                    <option value="all"{% if filters.resource_kind == "all" %} selected{% endif %}>Усі ресурси</option>
+                    <option value="machine"{% if filters.resource_kind == "machine" %} selected{% endif %}>Верстати</option>
+                    <option value="work_unit"{% if filters.resource_kind == "work_unit" %} selected{% endif %}>Дільниці</option>
+                </select>
+            </div>
+            <div class="field-group">
+                <label for="resource_id">Ресурс</label>
+                <select id="resource_id" name="resource_id">
+                    <option value="">Усі</option>
+                    {% for resource in resource_choices %}
+                        <option value="{{ resource.id }}"{% if filters.resource_id == resource.id|stringformat:"s" %} selected{% endif %}>{{ resource.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit">Оновити</button>
+            <a class="button-link" href="{% url 'production_dashboard' %}">До workspace</a>
+        </form>
+    </section>
+
+    <section class="panel">
+        <div class="panel-head">
+            <div>
+                <span class="eyebrow">Overdue list</span>
+                <h2>Проблемні етапи</h2>
+            </div>
+        </div>
+        {% if rows %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Замовлення</th>
+                        <th>Клієнт</th>
+                        <th>Етап</th>
+                        <th>Ресурс</th>
+                        <th>Відповідальний</th>
+                        <th>Планове завершення</th>
+                        <th>Просрочка</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td>{{ row.stage.order_item.order.title|default:"Без назви" }}</td>
+                            <td>
+                                {{ row.stage.order_item.order.contact.full_name }}
+                                {% if row.stage.order_item.order.contact.client %}
+                                    <div class="muted">{{ row.stage.order_item.order.contact.client.name }}</div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <strong>{{ row.stage.order_item.product.name }}</strong>
+                                <div class="muted">{{ row.stage.get_stage_type_display }} / {{ row.stage.get_status_display }}</div>
+                            </td>
+                            <td>{{ row.resource_label|default:"Не призначено" }}</td>
+                            <td>{% if row.stage.responsible %}{{ row.stage.responsible.email|default:row.stage.responsible.username }}{% else %}—{% endif %}</td>
+                            <td>{% if row.planned_end %}{{ row.planned_end|date:"d.m.Y H:i" }}{% else %}—{% endif %}</td>
+                            <td>{{ row.overdue_hours }} год</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="empty">Прострочених етапів немає.</p>
+        {% endif %}
+    </section>
+{% endblock %}

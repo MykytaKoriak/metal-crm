@@ -51,9 +51,13 @@ class Command(BaseCommand):
             stage=stage,
             start_datetime=start_datetime,
             end_datetime=end_datetime,
+            slot_type=ProductionSlot.SlotType.WORK,
+            operation_type=stage.stage_type,
             comment=comment,
+            planning_source=ProductionSlot.PlanningSource.SEED,
             planning_mode=ProductionSlot.PlanningMode.MANUAL,
             is_locked=True,
+            purpose=f"{stage.order_item.product.name} / {stage.get_stage_type_display()}",
         )
         setattr(slot, resource_field, resource)
         slot._planner_operation = True

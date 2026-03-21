@@ -83,6 +83,16 @@ class ManufacturePlanningTests(TestCase):
         )
         self.assertTrue(all(slot.start_datetime < slot.end_datetime for slot in slots))
 
+    def test_auto_slots_store_operation_metadata(self):
+        order = self.create_order()
+
+        slots = list(order.slots.select_related("stage", "stage__order_item__product").order_by("start_datetime", "id"))
+
+        self.assertTrue(all(slot.slot_type == ProductionSlot.SlotType.WORK for slot in slots))
+        self.assertTrue(all(slot.planning_source == ProductionSlot.PlanningSource.PLANNER for slot in slots))
+        self.assertTrue(all(slot.operation_type == slot.stage.stage_type for slot in slots if slot.stage_id))
+        self.assertTrue(all(slot.purpose for slot in slots))
+
     def test_planner_skips_blocked_resource_time(self):
         self.assembly.is_active = False
         self.assembly.save()
@@ -288,3 +298,93 @@ class ProductionCalendarViewTests(TestCase):
 
         self.assertIn("slot", kinds)
         self.assertIn("downtime", kinds)
+
+
+class ProductionWorkspaceViewTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="production-workspace@example.com",
+            email="production-workspace@example.com",
+            password="secret123",
+            is_active=True,
+        )
+        self.user.profile.role = self.user.profile.Role.PRODUCTION
+        self.user.profile.save()
+
+        client = Client.objects.create(name="Workspace Client", email="workspace-client@example.com")
+        contact = Contact.objects.create(client=client, full_name="Workspace Contact")
+        product = Product.objects.create(name="Workspace Product", sku="WS-001")
+        self.machine = Machine.objects.create(name="Workspace Laser", type=Machine.MachineType.LASER)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.order = Order.objects.create(contact=contact, manager=self.user)
+            OrderItem.objects.create(order=self.order, product=product, quantity=1, unit_price=Decimal("120.00"))
+
+        self.execution_stage = ProductionStage.objects.get(
+            order_item__order=self.order,
+            stage_type=ProductionStage.StageType.EXECUTION,
+        )
+        self.execution_slot = self.execution_stage.slots.first()
+
+    def test_stage_status_update_view_marks_stage_done(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("production_stage_status_update", args=[self.execution_stage.pk]),
+            {
+                "status": ProductionStage.Status.DONE,
+                "next": reverse("production_dashboard"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.execution_stage.refresh_from_db()
+        self.assertEqual(self.execution_stage.status, ProductionStage.Status.DONE)
+        self.assertIsNotNone(self.execution_stage.completed_at)
+
+    def test_stage_status_update_view_cancels_stage_and_clears_slots(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("production_stage_status_update", args=[self.execution_stage.pk]),
+            {
+                "status": ProductionStage.Status.CANCELLED,
+                "next": reverse("production_dashboard"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.execution_stage.refresh_from_db()
+        self.assertEqual(self.execution_stage.status, ProductionStage.Status.CANCELLED)
+        self.assertEqual(self.execution_stage.slots.count(), 0)
+
+    def test_free_slot_report_lists_windows_for_selected_machine(self):
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("production_free_slot_report"),
+            {
+                "resource_kind": "machine",
+                "resource_id": self.machine.pk,
+                "date_from": timezone.localdate().isoformat(),
+                "days": 3,
+                "min_hours": 1,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.machine.name)
+        self.assertGreater(len(response.context["rows"]), 0)
+
+    def test_overdue_stage_report_lists_overdue_stage(self):
+        self.execution_stage.status = ProductionStage.Status.IN_PROGRESS
+        self.execution_stage.planned_start = timezone.now() - timedelta(days=2)
+        self.execution_stage.planned_end = timezone.now() - timedelta(hours=4)
+        self.execution_stage.started_at = timezone.now() - timedelta(days=1)
+        self.execution_stage.save(
+            update_fields=["status", "planned_start", "planned_end", "started_at", "updated_at"]
+        )
+
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("production_overdue_stage_report"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.execution_stage.order_item.product.name)
+        self.assertGreater(len(response.context["rows"]), 0)

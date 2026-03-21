@@ -58,13 +58,7 @@ class WorkUnitAdmin(admin.ModelAdmin):
 
 @admin.register(ResourceDowntime)
 class ResourceDowntimeAdmin(admin.ModelAdmin):
-    list_display = (
-        "resource_display",
-        "downtime_type",
-        "start_datetime",
-        "end_datetime",
-        "is_blocking",
-    )
+    list_display = ("resource_display", "downtime_type", "start_datetime", "end_datetime", "is_blocking")
     list_filter = ("downtime_type", "is_blocking", "machine", "work_unit")
     search_fields = ("comment", "machine__name", "work_unit__name")
 
@@ -78,12 +72,17 @@ class StageSlotInline(admin.TabularInline):
     extra = 0
     fields = (
         "order",
+        "slot_type",
+        "operation_type",
         "machine",
         "work_unit",
         "start_datetime",
         "end_datetime",
         "planning_mode",
+        "planning_source",
         "is_locked",
+        "purpose",
+        "dispatcher_comment",
         "comment",
     )
 
@@ -126,21 +125,43 @@ class ProductionSlotAdmin(admin.ModelAdmin):
     list_display = (
         "order",
         "stage",
+        "slot_type",
+        "operation_type",
         "machine",
         "work_unit",
         "planning_mode",
+        "planning_source",
         "is_locked",
         "start_datetime",
         "end_datetime",
     )
-    list_filter = ("planning_mode", "is_locked", "machine", "work_unit", "stage__stage_type")
-    search_fields = ("order__title", "stage__order_item__product__name", "comment")
+    list_filter = (
+        "slot_type",
+        "operation_type",
+        "planning_mode",
+        "planning_source",
+        "is_locked",
+        "machine",
+        "work_unit",
+        "stage__stage_type",
+    )
+    search_fields = (
+        "order__title",
+        "stage__order_item__product__name",
+        "purpose",
+        "dispatcher_comment",
+        "comment",
+    )
     actions = ["return_to_auto_mode"]
     inlines = [ProductionSlotChangeLogInline]
     fieldsets = (
-        ("Основне", {"fields": ("order", "stage", "machine", "work_unit")}),
-        ("Розклад", {"fields": ("start_datetime", "end_datetime", "planning_mode", "is_locked")}),
-        ("Коментар", {"fields": ("comment",)}),
+        ("Основне", {"fields": ("order", "stage", "slot_type", "operation_type", "purpose")}),
+        ("Ресурс", {"fields": ("machine", "work_unit")}),
+        (
+            "Розклад",
+            {"fields": ("start_datetime", "end_datetime", "planning_mode", "planning_source", "is_locked")},
+        ),
+        ("Коментарі", {"fields": ("dispatcher_comment", "comment")}),
     )
 
     def get_urls(self):
@@ -190,6 +211,7 @@ class ProductionSlotAdmin(admin.ModelAdmin):
     def return_to_auto_mode(self, request, queryset):
         for slot in queryset:
             slot.planning_mode = ProductionSlot.PlanningMode.AUTO
+            slot.planning_source = ProductionSlot.PlanningSource.ADMIN
             slot.is_locked = False
             slot._changed_by = request.user
             slot._planner_operation = True

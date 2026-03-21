@@ -97,6 +97,7 @@ def prepare_slot_history(sender, instance, **kwargs):
         return
 
     instance.planning_mode = ProductionSlot.PlanningMode.MANUAL
+    instance.planning_source = ProductionSlot.PlanningSource.DISPATCHER
     instance.is_locked = True
     instance._history_source = "manual"
 

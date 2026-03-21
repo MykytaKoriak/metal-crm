@@ -54,13 +54,18 @@ def serialize_slot(slot):
         "id": slot.pk,
         "order_id": slot.order_id,
         "stage_id": slot.stage_id,
+        "slot_type": slot.slot_type,
+        "operation_type": slot.operation_type,
         "machine_id": slot.machine_id,
         "work_unit_id": slot.work_unit_id,
         "start_datetime": slot.start_datetime.isoformat() if slot.start_datetime else None,
         "end_datetime": slot.end_datetime.isoformat() if slot.end_datetime else None,
         "planning_mode": slot.planning_mode,
+        "planning_source": slot.planning_source,
         "is_locked": slot.is_locked,
+        "purpose": slot.purpose,
         "comment": slot.comment,
+        "dispatcher_comment": slot.dispatcher_comment,
     }
 
 
@@ -245,6 +250,284 @@ def get_stage_effective_end(stage):
     return stage.completed_at or stage.planned_end
 
 
+def get_stage_primary_slot(stage):
+    slot = (
+        stage.slots.exclude(start_datetime__isnull=True)
+        .exclude(end_datetime__isnull=True)
+        .select_related("machine", "work_unit")
+        .order_by("start_datetime", "id")
+        .first()
+    )
+    if slot:
+        return slot
+    return stage.slots.select_related("machine", "work_unit").order_by("id").first()
+
+
+def get_stage_resource(stage):
+    slot = get_stage_primary_slot(stage)
+    return slot.resource if slot else None
+
+
+def get_stage_operation_type(stage):
+    stage_type = getattr(stage, "stage_type", "")
+    if stage_type in dict(ProductionSlot.OperationType.choices):
+        return stage_type
+    return ProductionSlot.OperationType.OTHER
+
+
+def get_stage_purpose(stage):
+    if not getattr(stage, "pk", None):
+        return ""
+    return f"{stage.order_item.product.name} / {stage.get_stage_type_display()}"
+
+
+def build_stage_row(stage, *, now=None):
+    now = now or timezone.now()
+    slot = get_stage_primary_slot(stage)
+    resource = slot.resource if slot else None
+    planned_start = stage.planned_start or (slot.start_datetime if slot and slot.start_datetime else None)
+    planned_end = stage.planned_end or (slot.end_datetime if slot and slot.end_datetime else None)
+    is_terminal = stage.status in {ProductionStage.Status.DONE, ProductionStage.Status.CANCELLED}
+    overdue_seconds = 0
+    overdue_reason = ""
+    if planned_end and not is_terminal and planned_end < now:
+        overdue_seconds = max((now - planned_end).total_seconds(), 0)
+        overdue_reason = "deadline"
+    elif stage.status == ProductionStage.Status.IN_PROGRESS and stage.started_at and not planned_end:
+        overdue_seconds = max((now - stage.started_at).total_seconds(), 0)
+        overdue_reason = "stalled"
+
+    return {
+        "stage": stage,
+        "slot": slot,
+        "resource": resource,
+        "resource_label": get_resource_label(resource) if resource else "",
+        "resource_kind": get_resource_kind(resource) if resource else "",
+        "planned_start": planned_start,
+        "planned_end": planned_end,
+        "operation_type": get_stage_operation_type(stage),
+        "purpose": get_stage_purpose(stage),
+        "overdue_seconds": int(overdue_seconds),
+        "overdue_hours": round(overdue_seconds / 3600, 1) if overdue_seconds else 0,
+        "overdue_reason": overdue_reason,
+        "is_overdue": overdue_seconds > 0,
+        "is_terminal": is_terminal,
+    }
+
+
+def get_resource_catalog(*, resource_kind="all", active_only=False):
+    resources = []
+    if resource_kind in {"all", "machine"}:
+        queryset = Machine.objects.all().order_by("type", "name")
+        if active_only:
+            queryset = queryset.filter(is_active=True)
+        resources.extend(
+            {
+                "key": f"machine:{resource.pk}",
+                "kind": "machine",
+                "id": resource.pk,
+                "label": get_resource_label(resource),
+                "resource": resource,
+            }
+            for resource in queryset
+        )
+    if resource_kind in {"all", "work_unit"}:
+        queryset = WorkUnit.objects.all().order_by("type", "name")
+        if active_only:
+            queryset = queryset.filter(is_active=True)
+        resources.extend(
+            {
+                "key": f"work_unit:{resource.pk}",
+                "kind": "work_unit",
+                "id": resource.pk,
+                "label": get_resource_label(resource),
+                "resource": resource,
+            }
+            for resource in queryset
+        )
+    return resources
+
+
+def get_resource_from_filter(resource_kind, resource_id):
+    if not resource_id:
+        return None
+    if resource_kind == "machine":
+        return Machine.objects.filter(pk=resource_id).first()
+    if resource_kind == "work_unit":
+        return WorkUnit.objects.filter(pk=resource_id).first()
+    return None
+
+
+def build_free_slot_report(
+    *,
+    date_from=None,
+    days=7,
+    resource_kind="all",
+    resource_id=None,
+    min_duration_minutes=0,
+    active_only=False,
+):
+    start_date = date_from or timezone.localdate()
+    end_date = start_date + timedelta(days=max(days - 1, 0))
+    min_seconds = max(min_duration_minutes, 0) * 60
+
+    selected_resource = get_resource_from_filter(resource_kind, resource_id)
+    catalog = []
+    if selected_resource is not None:
+        catalog.append(
+            {
+                "key": f"{resource_kind}:{selected_resource.pk}",
+                "kind": resource_kind,
+                "id": selected_resource.pk,
+                "label": get_resource_label(selected_resource),
+                "resource": selected_resource,
+            }
+        )
+    else:
+        catalog = get_resource_catalog(resource_kind=resource_kind, active_only=active_only)
+
+    rows = []
+    for entry in catalog:
+        resource = entry["resource"]
+        if active_only and not resource.is_active:
+            continue
+        for offset in range((end_date - start_date).days + 1):
+            current_date = start_date + timedelta(days=offset)
+            plan = get_resource_day_plan(resource, current_date)
+            if not plan["work_window"]:
+                continue
+            for start, end in plan["free"]:
+                duration_seconds = (end - start).total_seconds()
+                if duration_seconds < min_seconds:
+                    continue
+                rows.append(
+                    {
+                        "resource": resource,
+                        "resource_label": entry["label"],
+                        "resource_kind": entry["kind"],
+                        "resource_kind_label": "Верстат" if entry["kind"] == "machine" else "Дільниця",
+                        "date": current_date,
+                        "start": start,
+                        "end": end,
+                        "duration_seconds": int(duration_seconds),
+                        "duration_hours": round(duration_seconds / 3600, 2),
+                    }
+                )
+
+    rows.sort(key=lambda row: (row["start"], row["resource_kind"], row["resource_label"]))
+    return {
+        "rows": rows,
+        "start_date": start_date,
+        "end_date": end_date,
+        "resource_choices": get_resource_catalog(resource_kind=resource_kind, active_only=False),
+    }
+
+
+def build_overdue_stage_report(*, now=None, resource_kind="all", resource_id=None):
+    now = now or timezone.now()
+    stages = (
+        ProductionStage.objects.select_related(
+            "order_item",
+            "order_item__product",
+            "order_item__order",
+            "order_item__order__contact",
+            "order_item__order__contact__client",
+            "responsible",
+        )
+        .prefetch_related("slots__machine", "slots__work_unit")
+        .exclude(status__in=[ProductionStage.Status.DONE, ProductionStage.Status.CANCELLED])
+        .order_by("planned_end", "sequence", "id")
+    )
+
+    rows = []
+    for stage in stages:
+        row = build_stage_row(stage, now=now)
+        if not row["is_overdue"]:
+            continue
+        if resource_kind == "machine" and row["resource_kind"] != "machine":
+            continue
+        if resource_kind == "work_unit" and row["resource_kind"] != "work_unit":
+            continue
+        if resource_id and (not row["resource"] or row["resource"].pk != int(resource_id)):
+            continue
+        rows.append(row)
+
+    rows.sort(
+        key=lambda row: (
+            -row["overdue_seconds"],
+            row["planned_end"] or now,
+            row["stage"].pk,
+        )
+    )
+    return {
+        "rows": rows,
+        "resource_choices": get_resource_catalog(resource_kind=resource_kind, active_only=False),
+    }
+
+
+def update_stage_status(stage, status, *, note=""):
+    allowed_statuses = {
+        ProductionStage.Status.IN_PROGRESS,
+        ProductionStage.Status.DONE,
+        ProductionStage.Status.CANCELLED,
+        ProductionStage.Status.BLOCKED,
+        ProductionStage.Status.SCHEDULED,
+    }
+    if status not in allowed_statuses:
+        raise ValidationError("Непідтримуваний статус етапу.")
+
+    with planner_execution(), transaction.atomic():
+        stage = ProductionStage.objects.select_related("order_item", "order_item__order").get(pk=stage.pk)
+        now = timezone.now()
+        changed_fields = []
+
+        if status == ProductionStage.Status.IN_PROGRESS:
+            if stage.started_at is None:
+                stage.started_at = now
+                changed_fields.append("started_at")
+            if stage.completed_at is not None:
+                stage.completed_at = None
+                changed_fields.append("completed_at")
+        elif status == ProductionStage.Status.DONE:
+            if stage.started_at is None:
+                stage.started_at = get_stage_effective_start(stage) or now
+                changed_fields.append("started_at")
+            if stage.completed_at != now:
+                stage.completed_at = now
+                changed_fields.append("completed_at")
+            if stage.planned_end is None:
+                stage.planned_end = now
+                changed_fields.append("planned_end")
+        elif status == ProductionStage.Status.CANCELLED:
+            for slot in list(stage.slots.all()):
+                slot._history_source = "system"
+                slot._history_note = note or "Слот видалено через скасування етапу."
+                slot.delete()
+            if stage.planned_start is not None:
+                stage.planned_start = None
+                changed_fields.append("planned_start")
+            if stage.planned_end is not None:
+                stage.planned_end = None
+                changed_fields.append("planned_end")
+            if stage.completed_at is None:
+                stage.completed_at = now
+                changed_fields.append("completed_at")
+        elif status == ProductionStage.Status.BLOCKED:
+            if stage.completed_at is not None:
+                stage.completed_at = None
+                changed_fields.append("completed_at")
+
+        if stage.status != status:
+            stage.status = status
+            changed_fields.append("status")
+
+        if changed_fields:
+            stage.save(update_fields=changed_fields + ["updated_at"])
+
+    request_replan_open_orders()
+    return stage
+
+
 def validate_production_slot(slot):
     resource = slot.resource
     if resource is None:
@@ -310,7 +593,12 @@ def validate_production_slot(slot):
         if next_stage:
             next_start = get_stage_effective_start(next_stage)
             next_stage_is_fixed = (
-                next_stage.status in {ProductionStage.Status.IN_PROGRESS, ProductionStage.Status.DONE}
+                next_stage.status
+                in {
+                    ProductionStage.Status.IN_PROGRESS,
+                    ProductionStage.Status.DONE,
+                    ProductionStage.Status.CANCELLED,
+                }
                 or next_stage.slots.filter(
                     Q(planning_mode=ProductionSlot.PlanningMode.MANUAL) | Q(is_locked=True)
                 ).exists()
@@ -452,7 +740,11 @@ def sync_stage_schedule_from_slots(stage, *, save=True):
 
 
 def _stage_has_fixed_schedule(stage):
-    if stage.status in {ProductionStage.Status.IN_PROGRESS, ProductionStage.Status.DONE}:
+    if stage.status in {
+        ProductionStage.Status.IN_PROGRESS,
+        ProductionStage.Status.DONE,
+        ProductionStage.Status.CANCELLED,
+    }:
         return True
     return stage.slots.filter(Q(planning_mode=ProductionSlot.PlanningMode.MANUAL) | Q(is_locked=True)).exists()
 
@@ -515,9 +807,14 @@ def _schedule_stage(stage, start_from):
     current_slot.stage = stage
     current_slot.start_datetime = best_choice["start"]
     current_slot.end_datetime = best_choice["end"]
+    current_slot.slot_type = ProductionSlot.SlotType.WORK
+    current_slot.operation_type = get_stage_operation_type(stage)
     current_slot.planning_mode = ProductionSlot.PlanningMode.AUTO
+    current_slot.planning_source = ProductionSlot.PlanningSource.PLANNER
     current_slot.is_locked = False
+    current_slot.purpose = get_stage_purpose(stage)
     current_slot.comment = f"Автопланування: {stage.get_stage_type_display()}"
+    current_slot.dispatcher_comment = ""
     if best_choice["field_name"] == "machine":
         current_slot.machine = best_choice["resource"]
         current_slot.work_unit = None
@@ -574,7 +871,13 @@ def replan_open_orders():
             order__in=orders,
             planning_mode=ProductionSlot.PlanningMode.AUTO,
             is_locked=False,
-        ).exclude(stage__status__in=[ProductionStage.Status.IN_PROGRESS, ProductionStage.Status.DONE])
+        ).exclude(
+            stage__status__in=[
+                ProductionStage.Status.IN_PROGRESS,
+                ProductionStage.Status.DONE,
+                ProductionStage.Status.CANCELLED,
+            ]
+        )
         for slot in auto_slots:
             slot.delete()
 

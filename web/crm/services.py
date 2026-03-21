@@ -39,21 +39,24 @@ def derive_order_status_from_production(order, *, preserve_terminal=True) -> str
         return order.Status.IN_PROGRESS
 
     total_stages = stages.count()
-    done_stages = stages.filter(status=ProductionStage.Status.DONE).count()
+    terminal_stages = stages.filter(
+        status__in=[ProductionStage.Status.DONE, ProductionStage.Status.CANCELLED]
+    ).count()
     has_started_production = (
-        done_stages > 0
+        terminal_stages > 0
         or stages.filter(
             status__in=[
                 ProductionStage.Status.SCHEDULED,
                 ProductionStage.Status.IN_PROGRESS,
                 ProductionStage.Status.BLOCKED,
+                ProductionStage.Status.CANCELLED,
             ]
         ).exists()
         or stages.filter(Q(planned_start__isnull=False) | Q(planned_end__isnull=False)).exists()
         or ProductionSlot.objects.filter(order=order).exists()
     )
 
-    if total_stages and done_stages == total_stages:
+    if total_stages and terminal_stages == total_stages:
         return order.Status.READY
 
     if has_started_production:
