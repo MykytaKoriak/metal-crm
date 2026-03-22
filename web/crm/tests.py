@@ -2,12 +2,14 @@ from datetime import timedelta
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from core.models import ChangeAuditLog, TelegramNotification
 from core.models import UserProfile
-from manufacture.models import ProductionStage
+from manufacture.models import Machine, ProductionStage, WorkUnit
 
 from .models import Client, Contact, Order, OrderItem, Product, Tag, Task
 
@@ -633,3 +635,120 @@ class TestRowLevelVisibility(CrmWorkspaceMixin, TestCase):
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
         )
         self.assertEqual(status_response.status_code, 404)
+
+
+class TestTaskModelValidation(CrmWorkspaceMixin, TestCase):
+    def setUp(self):
+        self.user = self.create_user_with_role("task-model@example.com", UserProfile.Role.SALES_MANAGER)
+        self.client_a = Client.objects.create(name="Task Client A")
+        self.contact_a = Contact.objects.create(client=self.client_a, full_name="Contact A")
+        self.client_b = Client.objects.create(name="Task Client B")
+        self.contact_b = Contact.objects.create(client=self.client_b, full_name="Contact B")
+        self.order_b = self.create_order(self.contact_b, manager=self.user)
+
+    def test_task_populates_client_and_contact_from_order(self):
+        task = Task(
+            order=self.order_b,
+            title="Autofill task",
+            assigned_by=self.user,
+            assigned_to=self.user,
+            date=timezone.localdate(),
+            status=Task.Status.NEW,
+        )
+
+        task.save()
+
+        self.assertEqual(task.client, self.client_b)
+        self.assertEqual(task.contact, self.contact_b)
+
+    def test_task_rejects_mismatched_order_and_client(self):
+        task = Task(
+            client=self.client_a,
+            contact=self.contact_a,
+            order=self.order_b,
+            title="Broken task",
+            assigned_by=self.user,
+            assigned_to=self.user,
+            date=timezone.localdate(),
+            status=Task.Status.NEW,
+        )
+
+        with self.assertRaises(ValidationError):
+            task.full_clean()
+
+
+class TestCrmEndToEndFlow(CrmWorkspaceMixin, TestCase):
+    def setUp(self):
+        self.manager = self.create_user_with_role("flow-manager@example.com", UserProfile.Role.SALES_MANAGER)
+        self.production_user = self.create_user_with_role("flow-production@example.com", UserProfile.Role.PRODUCTION)
+        self.manager.profile.telegram_chat_id = "81001"
+        self.manager.profile.save(update_fields=["telegram_chat_id"])
+        self.client_entity = Client.objects.create(name="Flow Client", email="flow@example.com")
+        self.contact = Contact.objects.create(client=self.client_entity, full_name="Flow Contact")
+        self.product = self.create_product(name_prefix="Flow Product")
+        self.storage = WorkUnit.objects.create(name="Flow Storage", type=WorkUnit.UnitType.STORAGE)
+        self.assembly = WorkUnit.objects.create(name="Flow Assembly", type=WorkUnit.UnitType.ASSEMBLY)
+        self.laser = Machine.objects.create(name="Flow Laser", type=Machine.MachineType.LASER)
+        self.paint = Machine.objects.create(name="Flow Paint", type=Machine.MachineType.PAINTING)
+
+    def test_client_to_ready_order_flow_creates_slots_audit_and_notifications(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            order = Order.objects.create(
+                contact=self.contact,
+                manager=self.manager,
+                status=Order.Status.NEW,
+                deadline=timezone.localdate() + timedelta(days=5),
+            )
+            OrderItem.objects.create(order=order, product=self.product, quantity=1, unit_price="250.00")
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.IN_PRODUCTION)
+        self.assertEqual(order.items.first().production_stages.count(), 5)
+        self.assertEqual(order.slots.count(), 5)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            task = Task.objects.create(
+                client=self.client_entity,
+                order=order,
+                title="Flow follow-up",
+                assigned_by=self.manager,
+                assigned_to=self.manager,
+                date=timezone.localdate() + timedelta(days=1),
+                status=Task.Status.NEW,
+            )
+
+        task.refresh_from_db()
+        self.assertEqual(task.contact, self.contact)
+        self.assertEqual(task.client, self.client_entity)
+        self.assertTrue(
+            TelegramNotification.objects.filter(
+                task=task,
+                notification_type=TelegramNotification.Type.TASK_CREATED,
+            ).exists()
+        )
+
+        finished_at = timezone.now()
+        for stage in order.items.first().production_stages.order_by("sequence", "id"):
+            stage._changed_by = self.production_user
+            stage.responsible = self.production_user
+            stage.status = ProductionStage.Status.DONE
+            stage.started_at = finished_at - timedelta(hours=1)
+            stage.completed_at = finished_at
+            stage.save(
+                update_fields=["responsible", "status", "started_at", "completed_at", "updated_at"]
+            )
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.READY)
+        self.assertTrue(
+            ChangeAuditLog.objects.filter(
+                entity_type=ChangeAuditLog.EntityType.ORDER,
+                object_id=order.pk,
+            ).exists()
+        )
+        self.assertTrue(
+            ChangeAuditLog.objects.filter(
+                entity_type=ChangeAuditLog.EntityType.TASK,
+                object_id=task.pk,
+            ).exists()
+        )

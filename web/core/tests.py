@@ -1,16 +1,19 @@
 from datetime import datetime, time, timedelta
+from io import StringIO
 from unittest.mock import patch
 from uuid import uuid4
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from crm.models import Client, Contact, Order, OrderItem, Product, Task
-from manufacture.models import Machine, ProductionSlot, ProductionStage, WorkUnit
+from manufacture.models import Machine, ProductionSlot, ProductionStage, ResourceDowntime, WorkUnit
 from .models import ChangeAuditLog, TelegramNotification, TelegramUpdateLog, UserProfile
 
 
@@ -876,3 +879,144 @@ class TestChangeAuditLog(DashboardTestMixin, TestCase):
             ).count(),
             len(slot_ids),
         )
+
+
+class TestSeedDemoDataCommand(TestCase):
+    def run_seed(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            call_command("seed_demo_data")
+
+    def test_seed_demo_data_creates_rich_demo_scenarios(self):
+        self.run_seed()
+
+        self.assertTrue(get_user_model().objects.filter(username="demo_manager").exists())
+        self.assertEqual(
+            UserProfile.objects.get(user__username="demo_production").role,
+            UserProfile.Role.PRODUCTION,
+        )
+        self.assertEqual(Order.objects.filter(comment__startswith="[seed-demo]").count(), 14)
+        self.assertEqual(Task.objects.filter(comment__startswith="[seed-demo]").count(), 6)
+        self.assertGreaterEqual(ProductionSlot.objects.count(), 13)
+        self.assertTrue(
+            ProductionStage.objects.filter(status=ProductionStage.Status.BLOCKED).exists()
+        )
+        self.assertTrue(
+            ProductionStage.objects.filter(
+                status=ProductionStage.Status.IN_PROGRESS,
+                planned_end__lt=timezone.now(),
+            ).exists()
+        )
+        self.assertTrue(
+            ProductionSlot.objects.filter(
+                planning_mode=ProductionSlot.PlanningMode.MANUAL,
+                is_locked=True,
+            ).exists()
+        )
+        self.assertTrue(
+            ProductionSlot.objects.filter(
+                planning_mode=ProductionSlot.PlanningMode.AUTO,
+                planning_source=ProductionSlot.PlanningSource.PLANNER,
+            ).exists()
+        )
+        self.assertTrue(Machine.objects.filter(is_active=False).exists())
+        self.assertEqual(ResourceDowntime.objects.filter(comment__startswith="[seed-demo]").count(), 2)
+        self.assertEqual(TelegramUpdateLog.objects.count(), 3)
+        self.assertTrue(
+            TelegramNotification.objects.filter(
+                notification_type=TelegramNotification.Type.TASK_DEADLINE
+            ).exists()
+        )
+        self.assertTrue(
+            TelegramNotification.objects.filter(
+                notification_type=TelegramNotification.Type.ORDER_OVERDUE
+            ).exists()
+        )
+        self.assertTrue(
+            TelegramNotification.objects.filter(status=TelegramNotification.Status.SENT).exists()
+        )
+        self.assertTrue(
+            TelegramNotification.objects.filter(status=TelegramNotification.Status.FAILED).exists()
+        )
+        self.assertTrue(
+            TelegramNotification.objects.filter(status=TelegramNotification.Status.PENDING).exists()
+        )
+
+    def test_seed_demo_data_is_idempotent_for_runtime_entities(self):
+        self.run_seed()
+        self.run_seed()
+
+        self.assertEqual(Order.objects.filter(comment__startswith="[seed-demo]").count(), 14)
+        self.assertEqual(Task.objects.filter(comment__startswith="[seed-demo]").count(), 6)
+        self.assertEqual(ResourceDowntime.objects.filter(comment__startswith="[seed-demo]").count(), 2)
+        self.assertEqual(TelegramUpdateLog.objects.count(), 3)
+        self.assertEqual(
+            get_user_model().objects.filter(
+                username__in=["demo_admin", "demo_manager", "demo_production", "demo_executive"]
+            ).count(),
+            4,
+        )
+
+
+class TestTelegramManagementCommands(TestCase):
+    @patch("core.management.commands.process_telegram_notifications.process_notification_queue")
+    def test_process_telegram_notifications_command_delegates_to_service(self, process_mock):
+        process_mock.return_value = {"queued": 3, "delivered": 2}
+        stdout = StringIO()
+
+        call_command("process_telegram_notifications", limit=25, stdout=stdout)
+
+        process_mock.assert_called_once()
+        self.assertEqual(process_mock.call_args.kwargs["limit"], 25)
+        self.assertIn("now", process_mock.call_args.kwargs)
+        self.assertIn("queued=3 delivered=2", stdout.getvalue())
+
+    @patch("core.management.commands.telegram_pull_updates.pull_updates_and_process")
+    def test_telegram_pull_updates_command_delegates_to_handler(self, pull_mock):
+        pull_mock.return_value = {"processed": 4, "next_offset": 123}
+        stdout = StringIO()
+
+        call_command("telegram_pull_updates", offset=10, limit=5, timeout=20, stdout=stdout)
+
+        pull_mock.assert_called_once_with(offset=10, limit=5, timeout=20)
+        self.assertIn("processed=4 next_offset=123", stdout.getvalue())
+
+    @override_settings(TELEGRAM_BOT_TOKEN="")
+    def test_run_telegram_bot_requires_token(self):
+        with self.assertRaises(CommandError):
+            call_command("run_telegram_bot", stdout=StringIO(), stderr=StringIO())
+
+    @override_settings(TELEGRAM_BOT_TOKEN="token")
+    @patch("core.management.commands.run_telegram_bot.close_old_connections")
+    @patch("core.management.commands.run_telegram_bot.pull_updates_and_process")
+    @patch("core.management.commands.run_telegram_bot.process_notification_queue")
+    def test_run_telegram_bot_processes_cycle_and_stops_on_keyboard_interrupt(
+        self,
+        process_mock,
+        pull_mock,
+        close_connections_mock,
+    ):
+        process_mock.side_effect = [
+            {"queued": 1, "delivered": 1},
+            {"queued": 0, "delivered": 0},
+        ]
+        pull_mock.side_effect = [
+            {"processed": 2, "next_offset": 55},
+            KeyboardInterrupt(),
+        ]
+        stdout = StringIO()
+
+        call_command(
+            "run_telegram_bot",
+            poll_timeout=1,
+            notify_limit=10,
+            retry_delay=1,
+            stdout=stdout,
+            stderr=StringIO(),
+        )
+
+        self.assertGreaterEqual(close_connections_mock.call_count, 1)
+        self.assertEqual(process_mock.call_args_list[0].kwargs["limit"], 10)
+        self.assertEqual(pull_mock.call_args_list[0].kwargs, {"offset": None, "limit": 100, "timeout": 1})
+        self.assertEqual(pull_mock.call_args_list[1].kwargs, {"offset": 55, "limit": 100, "timeout": 1})
+        self.assertIn("Telegram bot loop started.", stdout.getvalue())
+        self.assertIn("queued=1 delivered=1 updates=2 next_offset=55", stdout.getvalue())
