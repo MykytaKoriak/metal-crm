@@ -4,15 +4,29 @@ from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from django.contrib.auth.models import User
 
-from .models import UserProfile
+from .models import ChangeAuditLog, TelegramNotification, TelegramUpdateLog, UserProfile
 
 
 class UserProfileInline(admin.StackedInline):
     model = UserProfile
     can_delete = False
     extra = 0
-    fields = ("full_name", "phone", "role", "telegram_chat_id", "telegram_link_code")
-    readonly_fields = ("telegram_link_code",)
+    fields = (
+        "full_name",
+        "phone",
+        "role",
+        "telegram_chat_id",
+        "telegram_username",
+        "telegram_link_code",
+        "telegram_linked_at",
+        "telegram_notifications_enabled",
+        "telegram_notify_new_tasks",
+        "telegram_notify_deadlines",
+        "telegram_notify_overdue",
+        "telegram_notify_order_updates",
+        "telegram_notify_production_events",
+    )
+    readonly_fields = ("telegram_link_code", "telegram_linked_at")
 
 
 class AppUserCreationForm(forms.ModelForm):
@@ -86,15 +100,69 @@ class AppUserChangeForm(forms.ModelForm):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ("display_name", "user_email", "role", "phone", "telegram_chat_id")
-    list_filter = ("role",)
-    search_fields = ("full_name", "phone", "telegram_chat_id", "user__email", "user__username")
+    list_display = (
+        "display_name",
+        "user_email",
+        "role",
+        "phone",
+        "telegram_chat_id",
+        "telegram_notifications_enabled",
+    )
+    list_filter = ("role", "telegram_notifications_enabled")
+    search_fields = ("full_name", "phone", "telegram_chat_id", "telegram_username", "user__email", "user__username")
     autocomplete_fields = ("user",)
-    readonly_fields = ("telegram_link_code",)
+    readonly_fields = ("telegram_link_code", "telegram_linked_at")
 
     @admin.display(description="Email")
     def user_email(self, obj):
         return obj.user.email
+
+
+@admin.register(TelegramUpdateLog)
+class TelegramUpdateLogAdmin(admin.ModelAdmin):
+    list_display = ("update_id", "update_type", "chat_id", "username", "status", "processed_at")
+    list_filter = ("status", "update_type")
+    search_fields = ("chat_id", "username", "error_message")
+    readonly_fields = ("update_id", "chat_id", "username", "update_type", "payload", "status", "error_message", "processed_at", "created_at")
+
+
+@admin.register(TelegramNotification)
+class TelegramNotificationAdmin(admin.ModelAdmin):
+    list_display = ("notification_type", "profile", "status", "scheduled_for", "sent_at", "delivery_attempts")
+    list_filter = ("notification_type", "status")
+    search_fields = ("dedupe_key", "message_text", "profile__full_name", "profile__user__email")
+    autocomplete_fields = ("profile", "task", "order", "stage")
+    readonly_fields = ("dedupe_key", "message_text", "payload", "delivery_attempts", "sent_at", "created_at", "error_message")
+
+
+@admin.register(ChangeAuditLog)
+class ChangeAuditLogAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "entity_type", "object_id", "action", "changed_by", "object_label")
+    list_filter = ("entity_type", "action")
+    search_fields = ("object_label", "note", "changed_by__email", "changed_by__username")
+    autocomplete_fields = ("changed_by", "order", "task", "stage", "slot")
+    readonly_fields = (
+        "entity_type",
+        "action",
+        "object_id",
+        "object_label",
+        "changed_fields",
+        "snapshot_before",
+        "snapshot_after",
+        "note",
+        "changed_by",
+        "order",
+        "task",
+        "stage",
+        "slot",
+        "created_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 class AppUserAdmin(DjangoUserAdmin):

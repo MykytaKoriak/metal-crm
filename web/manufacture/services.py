@@ -7,6 +7,8 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from core.visibility import filter_orders_queryset, filter_stages_queryset
+
 from .models import (
     DEFAULT_WORKDAY_END,
     DEFAULT_WORKDAY_START,
@@ -161,7 +163,7 @@ def get_resource_unavailable_intervals(resource, start, end, *, exclude_slot_id=
     return merge_intervals(intervals)
 
 
-def get_resource_day_plan(resource, current_date):
+def get_resource_day_plan(resource, current_date, *, slot_queryset=None):
     window = get_resource_work_window(resource, current_date)
     if not window:
         return {
@@ -172,9 +174,22 @@ def get_resource_day_plan(resource, current_date):
         }
 
     day_start, day_end = window
+    if slot_queryset is None:
+        slot_iterable = get_resource_slot_conflicts(resource, day_start, day_end)
+    else:
+        slot_iterable = list(
+            slot_queryset.filter(
+                **_build_resource_filter(resource),
+                start_datetime__lt=day_end,
+                end_datetime__gt=day_start,
+            )
+            .select_related("order", "stage", "machine", "work_unit")
+            .order_by("start_datetime", "id")
+        )
+
     busy = [
         (max(slot.start_datetime, day_start), min(slot.end_datetime, day_end), slot)
-        for slot in get_resource_slot_conflicts(resource, day_start, day_end)
+        for slot in slot_iterable
         if slot.start_datetime and slot.end_datetime
     ]
     busy = [(start, end, slot) for start, end, slot in busy if start < end]
@@ -222,12 +237,23 @@ def get_resource_capacity_seconds(resource, start, end):
     return total
 
 
-def get_resource_busy_seconds(resource, start, end):
+def get_resource_busy_seconds(resource, start, end, *, slot_queryset=None):
     start = _ensure_aware(start)
     end = _ensure_aware(end)
+    if slot_queryset is None:
+        slot_iterable = get_resource_slot_conflicts(resource, start, end)
+    else:
+        slot_iterable = list(
+            slot_queryset.filter(
+                **_build_resource_filter(resource),
+                start_datetime__lt=end,
+                end_datetime__gt=start,
+            )
+            .order_by("start_datetime", "id")
+        )
     intervals = [
         (max(slot.start_datetime, start), min(slot.end_datetime, end))
-        for slot in get_resource_slot_conflicts(resource, start, end)
+        for slot in slot_iterable
         if slot.start_datetime and slot.end_datetime
     ]
     total = 0
@@ -366,6 +392,7 @@ def build_free_slot_report(
     resource_id=None,
     min_duration_minutes=0,
     active_only=False,
+    user=None,
 ):
     start_date = date_from or timezone.localdate()
     end_date = start_date + timedelta(days=max(days - 1, 0))
@@ -423,21 +450,23 @@ def build_free_slot_report(
     }
 
 
-def build_overdue_stage_report(*, now=None, resource_kind="all", resource_id=None):
+def build_overdue_stage_report(*, now=None, resource_kind="all", resource_id=None, user=None):
     now = now or timezone.now()
+    stages = ProductionStage.objects.select_related(
+        "order_item",
+        "order_item__product",
+        "order_item__order",
+        "order_item__order__contact",
+        "order_item__order__contact__client",
+        "responsible",
+    )
     stages = (
-        ProductionStage.objects.select_related(
-            "order_item",
-            "order_item__product",
-            "order_item__order",
-            "order_item__order__contact",
-            "order_item__order__contact__client",
-            "responsible",
-        )
-        .prefetch_related("slots__machine", "slots__work_unit")
+        stages.prefetch_related("slots__machine", "slots__work_unit")
         .exclude(status__in=[ProductionStage.Status.DONE, ProductionStage.Status.CANCELLED])
         .order_by("planned_end", "sequence", "id")
     )
+    if user is not None:
+        stages = filter_stages_queryset(user, stages)
 
     rows = []
     for stage in stages:
@@ -463,6 +492,209 @@ def build_overdue_stage_report(*, now=None, resource_kind="all", resource_id=Non
         "rows": rows,
         "resource_choices": get_resource_catalog(resource_kind=resource_kind, active_only=False),
     }
+
+
+def _get_order_stages(order):
+    return list(
+        ProductionStage.objects.filter(order_item__order=order)
+        .select_related(
+            "order_item",
+            "order_item__product",
+            "order_item__order",
+            "order_item__order__contact",
+            "order_item__order__contact__client",
+            "responsible",
+        )
+        .prefetch_related("slots__machine", "slots__work_unit")
+        .order_by("sequence", "planned_start", "id")
+    )
+
+
+def _select_current_stage(stage_rows):
+    if not stage_rows:
+        return None
+
+    in_progress = [row for row in stage_rows if row["stage"].status == ProductionStage.Status.IN_PROGRESS]
+    if in_progress:
+        return min(
+            in_progress,
+            key=lambda row: (
+                row["planned_start"] or timezone.now(),
+                row["stage"].sequence,
+                row["stage"].pk,
+            ),
+        )
+
+    active = [
+        row
+        for row in stage_rows
+        if row["stage"].status
+        not in {ProductionStage.Status.DONE, ProductionStage.Status.CANCELLED}
+    ]
+    if active:
+        return min(
+            active,
+            key=lambda row: (
+                0 if row["stage"].status == ProductionStage.Status.BLOCKED else 1,
+                row["planned_start"] or timezone.now() + timedelta(days=3650),
+                row["stage"].sequence,
+                row["stage"].pk,
+            ),
+        )
+
+    return max(
+        stage_rows,
+        key=lambda row: (
+            row["planned_end"] or timezone.now(),
+            row["stage"].sequence,
+            row["stage"].pk,
+        ),
+    )
+
+
+def build_order_row(order, *, now=None, today=None):
+    now = now or timezone.now()
+    today = today or timezone.localdate()
+    stages = _get_order_stages(order)
+    stage_rows = [build_stage_row(stage, now=now) for stage in stages]
+    total_stages = len(stage_rows)
+    terminal_stage_count = sum(1 for row in stage_rows if row["is_terminal"])
+    done_stage_count = sum(1 for row in stage_rows if row["stage"].status == ProductionStage.Status.DONE)
+    open_stage_count = max(total_stages - terminal_stage_count, 0)
+    blocked_stage_count = sum(1 for row in stage_rows if row["stage"].status == ProductionStage.Status.BLOCKED)
+    overdue_stage_count = sum(1 for row in stage_rows if row["is_overdue"])
+    unplanned_stage_count = sum(
+        1
+        for row in stage_rows
+        if not row["is_terminal"] and not row["planned_start"] and not row["planned_end"]
+    )
+    progress_percent = round((terminal_stage_count / total_stages * 100) if total_stages else 0)
+    current_stage_row = _select_current_stage(stage_rows)
+
+    deadline = order.deadline
+    days_to_deadline = (deadline - today).days if deadline else None
+    planned_completion = max(
+        (row["planned_end"] for row in stage_rows if row["planned_end"]),
+        default=None,
+    )
+
+    risk_reasons = []
+    risk_level = "healthy"
+
+    if deadline and deadline < today:
+        risk_level = "critical"
+        risk_reasons.append("Дедлайн уже просрочен")
+
+    if overdue_stage_count:
+        risk_level = "critical"
+        risk_reasons.append(f"Просрочено этапов: {overdue_stage_count}")
+
+    if planned_completion and deadline and planned_completion.date() > deadline and risk_level != "critical":
+        risk_level = "warning"
+        risk_reasons.append("Плановое завершение позже дедлайна")
+
+    if blocked_stage_count and risk_level == "healthy":
+        risk_level = "warning"
+        risk_reasons.append("Есть заблокированный этап")
+
+    if deadline and days_to_deadline is not None and days_to_deadline <= 2 and progress_percent < 100:
+        if risk_level == "healthy":
+            risk_level = "warning"
+        risk_reasons.append("Близкий дедлайн")
+
+    if deadline and days_to_deadline is not None and days_to_deadline <= 5 and unplanned_stage_count:
+        if risk_level == "healthy":
+            risk_level = "warning"
+        risk_reasons.append("Есть незапланированные этапы перед дедлайном")
+
+    if not risk_reasons:
+        risk_reasons.append("Риск не выявлен")
+
+    risk_label = {
+        "healthy": "Норма",
+        "warning": "Ризик",
+        "critical": "Критично",
+    }[risk_level]
+
+    return {
+        "order": order,
+        "stage_rows": stage_rows,
+        "current_stage_row": current_stage_row,
+        "current_stage": current_stage_row["stage"] if current_stage_row else None,
+        "current_stage_label": (
+            current_stage_row["stage"].get_stage_type_display() if current_stage_row else "Без активного этапа"
+        ),
+        "current_resource_label": current_stage_row["resource_label"] if current_stage_row else "",
+        "current_responsible": (
+            current_stage_row["stage"].responsible if current_stage_row and current_stage_row["stage"].responsible else None
+        ),
+        "total_stages": total_stages,
+        "terminal_stage_count": terminal_stage_count,
+        "done_stage_count": done_stage_count,
+        "open_stage_count": open_stage_count,
+        "blocked_stage_count": blocked_stage_count,
+        "overdue_stage_count": overdue_stage_count,
+        "unplanned_stage_count": unplanned_stage_count,
+        "progress_percent": progress_percent,
+        "deadline": deadline,
+        "days_to_deadline": days_to_deadline,
+        "planned_completion": planned_completion,
+        "risk_level": risk_level,
+        "risk_label": risk_label,
+        "risk_reasons": risk_reasons,
+        "is_at_risk": risk_level in {"warning", "critical"},
+    }
+
+
+def build_orders_in_work_report(
+    *,
+    now=None,
+    manager_id=None,
+    responsible_id=None,
+    status=None,
+    risk_only=False,
+    user=None,
+):
+    from crm.models import Order
+
+    now = now or timezone.now()
+    today = timezone.localdate()
+
+    queryset = filter_orders_queryset(
+        user,
+        Order.objects.exclude(status__in=[Order.Status.COMPLETED, Order.Status.CANCELED])
+        .select_related("contact", "contact__client", "manager")
+        .order_by("deadline", "-created_at", "id"),
+    )
+    if user is None:
+        queryset = (
+            Order.objects.exclude(status__in=[Order.Status.COMPLETED, Order.Status.CANCELED])
+            .select_related("contact", "contact__client", "manager")
+            .order_by("deadline", "-created_at", "id")
+        )
+    if manager_id:
+        queryset = queryset.filter(manager_id=manager_id)
+    if status:
+        queryset = queryset.filter(status=status)
+
+    rows = []
+    for order in queryset:
+        row = build_order_row(order, now=now, today=today)
+        if responsible_id and (not row["current_responsible"] or str(row["current_responsible"].pk) != str(responsible_id)):
+            continue
+        if risk_only and not row["is_at_risk"]:
+            continue
+        rows.append(row)
+
+    rows.sort(
+        key=lambda row: (
+            0 if row["risk_level"] == "critical" else 1 if row["risk_level"] == "warning" else 2,
+            row["deadline"] or (today + timedelta(days=3650)),
+            row["progress_percent"],
+            row["order"].pk,
+        )
+    )
+    return rows
 
 
 def update_stage_status(stage, status, *, note=""):

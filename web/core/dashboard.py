@@ -11,12 +11,14 @@ from crm.models import Client, Order, OrderItem, Task
 from manufacture.models import Machine, ProductionSlot, ProductionStage, WorkUnit
 from manufacture.services import (
     build_free_slot_report,
+    build_orders_in_work_report,
     build_overdue_stage_report,
     build_stage_row,
     get_resource_catalog,
 )
 
 from .access import ROLE_GROUP_NAMES
+from .visibility import filter_orders_queryset, filter_stages_queryset
 
 
 MONEY_FIELD = DecimalField(max_digits=12, decimal_places=2)
@@ -246,6 +248,7 @@ def get_production_dashboard_context(request=None):
     now = timezone.now()
     today = timezone.localdate()
     production = get_production_load_context()
+    user = getattr(request, "user", None)
 
     query = request.GET if request is not None else {}
     resource_kind = query.get("resource_kind", "all")
@@ -255,7 +258,8 @@ def get_production_dashboard_context(request=None):
     stage_status = query.get("stage_status", "").strip()
     only_overdue = query.get("only_overdue") == "1"
 
-    queue_queryset = (
+    queue_queryset = filter_stages_queryset(
+        user,
         ProductionStage.objects.select_related(
             "order_item",
             "order_item__product",
@@ -265,7 +269,7 @@ def get_production_dashboard_context(request=None):
             "responsible",
         )
         .prefetch_related("slots__machine", "slots__work_unit")
-        .order_by("planned_start", "sequence", "id")
+        .order_by("planned_start", "sequence", "id"),
     )
 
     if stage_status:
@@ -307,6 +311,7 @@ def get_production_dashboard_context(request=None):
         now=now,
         resource_kind=resource_kind,
         resource_id=resource_id or None,
+        user=user,
     )
     free_slot_report = build_free_slot_report(
         date_from=today,
@@ -318,7 +323,10 @@ def get_production_dashboard_context(request=None):
     )
 
     overdue_orders = list(
-        Order.objects.filter(deadline__lt=today)
+        filter_orders_queryset(
+            user,
+            Order.objects.filter(deadline__lt=today),
+        )
         .exclude(status__in=[Order.Status.COMPLETED, Order.Status.CANCELED])
         .select_related("contact", "contact__client", "manager")
         .order_by("deadline")[:10]
@@ -396,6 +404,26 @@ def get_monthly_revenue_rows(months=6):
 def get_executive_dashboard_context():
     today = timezone.localdate()
     recent_since = today - timedelta(days=30)
+    now = timezone.now()
+    production = get_production_load_context()
+    overdue_stage_report = build_overdue_stage_report(now=now)
+    orders_in_work = build_orders_in_work_report(now=now)
+    at_risk_orders = [row for row in orders_in_work if row["is_at_risk"]]
+    critical_resources = [
+        row
+        for row in [*production["machine_rows"], *production["workunit_rows"]]
+        if row["status"] == "critical"
+    ]
+    stalled_tasks_qs = (
+        Task.objects.exclude(status=Task.Status.DONE)
+        .filter(Q(date__lt=today) | Q(status=Task.Status.WAITING))
+        .select_related("client", "contact", "order", "assigned_to")
+        .order_by("date", "id")
+    )
+    stalled_tasks = list(stalled_tasks_qs[:10])
+    open_orders_count = Order.objects.exclude(status__in=[Order.Status.COMPLETED, Order.Status.CANCELED]).count()
+    in_production_count = Order.objects.filter(status=Order.Status.IN_PRODUCTION).count()
+    in_production_share = round((in_production_count / open_orders_count * 100) if open_orders_count else 0, 1)
 
     return {
         "new_clients_count": Client.objects.filter(created_at__date__gte=recent_since).count(),
@@ -405,5 +433,19 @@ def get_executive_dashboard_context():
             Order.objects.select_related("contact", "contact__client", "manager").order_by("-created_at")[:8]
         ),
         "monthly_revenue": get_monthly_revenue_rows(),
-        "production": get_production_load_context(),
+        "production": production,
+        "critical_resources": critical_resources[:8],
+        "overdue_stage_rows": overdue_stage_report["rows"][:8],
+        "at_risk_orders": at_risk_orders[:8],
+        "stalled_tasks": stalled_tasks,
+        "order_status_rows": get_order_status_rows(Order.objects.all()),
+        "executive_summary": {
+            "open_orders_count": open_orders_count,
+            "in_production_count": in_production_count,
+            "in_production_share": in_production_share,
+            "overdue_stage_count": len(overdue_stage_report["rows"]),
+            "critical_resource_count": len(critical_resources),
+            "at_risk_order_count": len(at_risk_orders),
+            "stalled_task_count": stalled_tasks_qs.count(),
+        },
     }

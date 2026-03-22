@@ -61,8 +61,13 @@
 
     <section class="section-grid two-up">
         <article class="panel">
-            <span class="eyebrow">Orders</span>
-            <h2>Мої замовлення по статусах</h2>
+            <div class="panel-head">
+                <div>
+                    <span class="eyebrow">Orders</span>
+                    <h2>Мої замовлення по статусах</h2>
+                </div>
+                <a href="{% url 'production_orders_in_work_report' %}" class="button-link">Звіт по замовленнях</a>
+            </div>
             {% for row in order_status_rows %}
                 <div class="bar-row">
                     <strong>{{ row.label }}</strong>

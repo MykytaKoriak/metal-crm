@@ -10,6 +10,8 @@ from .views import (
     my_account,
     production_dashboard,
     sales_dashboard,
+    telegram_webhook,
+    update_telegram_preferences,
 )
 
 
@@ -35,4 +37,6 @@ urlpatterns = [
     path("dashboard/production/", production_dashboard, name="production_dashboard"),
     path("dashboard/executive/", executive_dashboard, name="executive_dashboard"),
     path("account/me/", my_account, name="my_account"),
+    path("account/me/telegram/", update_telegram_preferences, name="update_telegram_preferences"),
+    path("integrations/telegram/webhook/", telegram_webhook, name="telegram_webhook"),
 ]

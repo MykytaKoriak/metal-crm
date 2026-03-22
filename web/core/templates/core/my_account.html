@@ -1,19 +1,21 @@
 {% extends "core/dashboard_base.html" %}
 
-{% block title %}Мій акаунт{% endblock %}
-{% block eyebrow %}Особистий кабінет{% endblock %}
+{% block title %}My Account{% endblock %}
+{% block eyebrow %}Account{% endblock %}
 {% block hero_title %}{{ profile.display_name }}{% endblock %}
-{% block hero_text %}Контакти користувача, прив'язка Telegram і персональні задачі.{% endblock %}
+{% block hero_text %}Рабочий профиль, Telegram-привязка и персональные задачи пользователя.{% endblock %}
 
 {% block extra_head %}
     <style>
-        .profile-grid,
-        .stats-grid {
+        .info-grid,
+        .stats-grid,
+        .toggle-grid,
+        .task-grid {
             display: grid;
             gap: 8px;
         }
 
-        .profile-grid {
+        .info-grid {
             grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         }
 
@@ -21,24 +23,88 @@
             grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
         }
 
+        .toggle-grid {
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        }
+
+        .task-grid {
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        }
+
         .info-card,
-        .task-card {
+        .toggle-card,
+        .task-card,
+        .message-strip {
             border: 1px solid var(--line);
             border-radius: 6px;
             background: var(--surface);
+        }
+
+        .info-card,
+        .toggle-card,
+        .task-card {
             padding: 10px;
         }
 
-        .info-card strong {
+        .info-card strong,
+        .task-card h3 {
             display: block;
+            margin: 0 0 4px;
             font-size: 14px;
             font-weight: 600;
         }
 
         .info-card span,
         .task-copy,
-        .task-meta {
+        .task-meta,
+        .helper-copy,
+        .toggle-copy {
             color: var(--muted);
+            font-size: 13px;
+        }
+
+        .message-strip {
+            margin-bottom: 8px;
+            padding: 8px 10px;
+        }
+
+        .message-strip.error {
+            border-color: rgba(180, 35, 24, 0.2);
+            background: rgba(180, 35, 24, 0.04);
+        }
+
+        .message-strip.success {
+            border-color: rgba(2, 122, 72, 0.2);
+            background: rgba(2, 122, 72, 0.04);
+        }
+
+        .code-box {
+            display: inline-flex;
+            align-items: center;
+            min-height: 28px;
+            padding: 4px 8px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--surface-muted);
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 13px;
+            letter-spacing: 0.04em;
+        }
+
+        .toggle-card label {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 8px;
+            align-items: start;
+        }
+
+        .toggle-card input[type="checkbox"] {
+            margin-top: 2px;
+        }
+
+        .toggle-card strong {
+            display: block;
+            margin-bottom: 2px;
             font-size: 13px;
         }
 
@@ -51,7 +117,7 @@
         }
 
         .task-card.overdue {
-            border-color: rgba(180, 35, 24, 0.22);
+            border-color: rgba(180, 35, 24, 0.2);
             background: rgba(180, 35, 24, 0.03);
         }
 
@@ -60,21 +126,45 @@
             background: rgba(2, 122, 72, 0.03);
         }
 
-        .task-card h3 {
-            margin: 0 0 4px;
-            font-size: 14px;
-        }
-
         .task-card p {
             margin: 4px 0 0;
             font-size: 13px;
         }
 
-        .task-status-row {
+        .task-status-row,
+        .helper-row,
+        .form-actions {
             display: flex;
             flex-wrap: wrap;
             gap: 6px;
             align-items: center;
+        }
+
+        .helper-row {
+            margin-top: 8px;
+        }
+
+        .form-actions {
+            margin-top: 10px;
+        }
+
+        .submit-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 30px;
+            padding: 4px 10px;
+            border: 1px solid var(--accent);
+            border-radius: 6px;
+            background: var(--accent-soft);
+            color: var(--accent);
+            cursor: pointer;
+        }
+
+        @media (max-width: 720px) {
+            .task-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 {% endblock %}
@@ -82,27 +172,35 @@
 {% block hero_stats %}
     <div class="chip">
         <strong>{{ stats.total_tasks }}</strong>
-        <span>Усього задач</span>
+        <span>Всего задач</span>
     </div>
     <div class="chip">
         <strong>{{ stats.open_tasks }}</strong>
-        <span>Відкриті</span>
+        <span>Открытые</span>
     </div>
     <div class="chip">
         <strong>{{ stats.overdue_tasks }}</strong>
-        <span>Прострочені</span>
+        <span>Просроченные</span>
     </div>
     <div class="chip">
         <strong>{{ stats.completion_rate }}%</strong>
-        <span>Виконання</span>
+        <span>Выполнение</span>
     </div>
 {% endblock %}
 
 {% block content %}
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message-strip {% if message.tags %}{{ message.tags }}{% endif %}">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+
     <section class="panel">
-        <span class="eyebrow">Профіль</span>
-        <h2>Основні дані</h2>
-        <div class="profile-grid">
+        <span class="eyebrow">Profile</span>
+        <h2>Основные данные</h2>
+        <div class="info-grid">
             <div class="info-card">
                 <span>Роль</span>
                 <strong>{{ profile.get_role_display }}</strong>
@@ -113,74 +211,166 @@
             </div>
             <div class="info-card">
                 <span>Телефон</span>
-                <strong>{{ profile.phone|default:"—" }}</strong>
-            </div>
-            <div class="info-card">
-                <span>Telegram ID</span>
-                <strong>{{ profile.telegram_chat_id|default:"—" }}</strong>
-            </div>
-            <div class="info-card">
-                <span>Код прив'язки</span>
-                <strong>{{ profile.telegram_link_code }}</strong>
+                <strong>{{ profile.phone|default:"-" }}</strong>
             </div>
             <div class="info-card">
                 <span>Статус</span>
-                <strong>{% if user.is_active %}Активний{% else %}Неактивний{% endif %}</strong>
-            </div>
-        </div>
-    </section>
-
-    <section class="panel">
-        <span class="eyebrow">Статистика</span>
-        <h2>Задачі користувача</h2>
-        <div class="stats-grid">
-            <div class="metric">
-                <strong>{{ stats.total_tasks }}</strong>
-                <span>Усього</span>
-            </div>
-            <div class="metric">
-                <strong>{{ stats.open_tasks }}</strong>
-                <span>Відкриті</span>
-            </div>
-            <div class="metric">
-                <strong>{{ stats.new_tasks }}</strong>
-                <span>Нові</span>
-            </div>
-            <div class="metric">
-                <strong>{{ stats.in_progress_tasks }}</strong>
-                <span>В роботі</span>
-            </div>
-            <div class="metric">
-                <strong>{{ stats.waiting_tasks }}</strong>
-                <span>Очікують</span>
-            </div>
-            <div class="metric">
-                <strong>{{ stats.completed_tasks }}</strong>
-                <span>Виконані</span>
-            </div>
-            <div class="metric">
-                <strong>{{ stats.overdue_tasks }}</strong>
-                <span>Прострочені</span>
-            </div>
-            <div class="metric">
-                <strong>{{ stats.due_today_tasks }}</strong>
-                <span>На сьогодні</span>
-            </div>
-            <div class="metric">
-                <strong>{{ stats.tasks_created_by_me }}</strong>
-                <span>Створено мною</span>
-            </div>
-            <div class="metric">
-                <strong>{{ stats.completion_rate }}%</strong>
-                <span>Виконання</span>
+                <strong>{% if user.is_active %}Активный{% else %}Неактивный{% endif %}</strong>
             </div>
         </div>
     </section>
 
     <section class="section-grid two-up">
         <article class="panel">
-            <span class="eyebrow">Активні задачі</span>
-            <h2>Поточні</h2>
+            <span class="eyebrow">Telegram</span>
+            <h2>Привязка бота</h2>
+            <div class="info-grid">
+                <div class="info-card">
+                    <span>Статус</span>
+                    <strong>{% if profile.telegram_is_linked %}Подключен{% else %}Не подключен{% endif %}</strong>
+                </div>
+                <div class="info-card">
+                    <span>Chat ID</span>
+                    <strong>{{ profile.telegram_chat_id|default:"-" }}</strong>
+                </div>
+                <div class="info-card">
+                    <span>Username</span>
+                    <strong>{{ profile.telegram_username|default:"-" }}</strong>
+                </div>
+                <div class="info-card">
+                    <span>Код привязки</span>
+                    <strong><span class="code-box">{{ profile.telegram_link_code }}</span></strong>
+                </div>
+            </div>
+            <div class="helper-row">
+                <span class="helper-copy">Команды: <code>/link {{ profile.telegram_link_code }}</code>, <code>/tasks</code>, <code>/orders</code>, <code>/unlink</code>.</span>
+            </div>
+            {% if profile.telegram_linked_at %}
+                <div class="helper-row">
+                    <span class="helper-copy">Привязано: {{ profile.telegram_linked_at|date:"d.m.Y H:i" }}</span>
+                </div>
+            {% endif %}
+        </article>
+
+        <article class="panel">
+            <span class="eyebrow">Statistics</span>
+            <h2>Задачи пользователя</h2>
+            <div class="stats-grid">
+                <div class="metric">
+                    <strong>{{ stats.total_tasks }}</strong>
+                    <span>Всего</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ stats.open_tasks }}</strong>
+                    <span>Открытые</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ stats.new_tasks }}</strong>
+                    <span>Новые</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ stats.in_progress_tasks }}</strong>
+                    <span>В работе</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ stats.waiting_tasks }}</strong>
+                    <span>Ожидают</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ stats.completed_tasks }}</strong>
+                    <span>Выполнены</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ stats.overdue_tasks }}</strong>
+                    <span>Просрочены</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ stats.due_today_tasks }}</strong>
+                    <span>На сегодня</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ stats.tasks_created_by_me }}</strong>
+                    <span>Создано мной</span>
+                </div>
+                <div class="metric">
+                    <strong>{{ stats.completion_rate }}%</strong>
+                    <span>Выполнение</span>
+                </div>
+            </div>
+        </article>
+    </section>
+
+    <section class="panel">
+        <span class="eyebrow">Notifications</span>
+        <h2>Настройки Telegram-уведомлений</h2>
+        <form method="post" action="{% url 'update_telegram_preferences' %}">
+            {% csrf_token %}
+            <div class="toggle-grid">
+                <div class="toggle-card">
+                    <label for="{{ telegram_preferences_form.telegram_notifications_enabled.id_for_label }}">
+                        {{ telegram_preferences_form.telegram_notifications_enabled }}
+                        <span>
+                            <strong>Включить Telegram-уведомления</strong>
+                            <span class="toggle-copy">Общий переключатель доставки уведомлений и напоминаний.</span>
+                        </span>
+                    </label>
+                </div>
+                <div class="toggle-card">
+                    <label for="{{ telegram_preferences_form.telegram_notify_new_tasks.id_for_label }}">
+                        {{ telegram_preferences_form.telegram_notify_new_tasks }}
+                        <span>
+                            <strong>Новые задачи</strong>
+                            <span class="toggle-copy">Уведомления при создании и перепривязке задач на пользователя.</span>
+                        </span>
+                    </label>
+                </div>
+                <div class="toggle-card">
+                    <label for="{{ telegram_preferences_form.telegram_notify_deadlines.id_for_label }}">
+                        {{ telegram_preferences_form.telegram_notify_deadlines }}
+                        <span>
+                            <strong>Приближение дедлайна</strong>
+                            <span class="toggle-copy">Напоминания по задачам и заказам с близким сроком.</span>
+                        </span>
+                    </label>
+                </div>
+                <div class="toggle-card">
+                    <label for="{{ telegram_preferences_form.telegram_notify_overdue.id_for_label }}">
+                        {{ telegram_preferences_form.telegram_notify_overdue }}
+                        <span>
+                            <strong>Просрочка</strong>
+                            <span class="toggle-copy">Ежедневные уведомления по просроченным задачам и заказам.</span>
+                        </span>
+                    </label>
+                </div>
+                <div class="toggle-card">
+                    <label for="{{ telegram_preferences_form.telegram_notify_order_updates.id_for_label }}">
+                        {{ telegram_preferences_form.telegram_notify_order_updates }}
+                        <span>
+                            <strong>Статусы заказов</strong>
+                            <span class="toggle-copy">Изменение статуса и ключевые переходы по заказу.</span>
+                        </span>
+                    </label>
+                </div>
+                <div class="toggle-card">
+                    <label for="{{ telegram_preferences_form.telegram_notify_production_events.id_for_label }}">
+                        {{ telegram_preferences_form.telegram_notify_production_events }}
+                        <span>
+                            <strong>События производства</strong>
+                            <span class="toggle-copy">Старт, блокировка, завершение и отмена этапов производства.</span>
+                        </span>
+                    </label>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="submit-button">Сохранить настройки</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="task-grid">
+        <article class="panel">
+            <span class="eyebrow">Open</span>
+            <h2>Текущие задачи</h2>
             {% if current_tasks %}
                 <ul class="task-list">
                     {% for task in current_tasks %}
@@ -199,24 +389,24 @@
                             {% if task.comment %}
                                 <p>{{ task.comment }}</p>
                             {% endif %}
-                            <p class="task-copy">Клієнт: {{ task.client.name }}</p>
+                            <p class="task-copy">Клиент: {{ task.client.name }}</p>
                             {% if task.contact %}
                                 <p class="task-copy">Контакт: {{ task.contact.full_name }}</p>
                             {% endif %}
                             {% if task.order_id %}
-                                <p class="task-copy">{% if task.order.title %}{{ task.order.title }}{% else %}Замовлення #{{ task.order_id }}{% endif %}</p>
+                                <p class="task-copy">{% if task.order.title %}{{ task.order.title }}{% else %}Заказ #{{ task.order_id }}{% endif %}</p>
                             {% endif %}
                         </li>
                     {% endfor %}
                 </ul>
             {% else %}
-                <p class="empty">Поточних задач немає.</p>
+                <p class="empty">Текущих задач нет.</p>
             {% endif %}
         </article>
 
         <article class="panel">
-            <span class="eyebrow">Ризики</span>
-            <h2>Прострочені</h2>
+            <span class="eyebrow">Risk</span>
+            <h2>Просроченные задачи</h2>
             {% if overdue_tasks %}
                 <ul class="task-list">
                     {% for task in overdue_tasks %}
@@ -235,49 +425,49 @@
                             {% if task.comment %}
                                 <p>{{ task.comment }}</p>
                             {% endif %}
-                            <p class="task-copy">Клієнт: {{ task.client.name }}</p>
+                            <p class="task-copy">Клиент: {{ task.client.name }}</p>
                             {% if task.contact %}
                                 <p class="task-copy">Контакт: {{ task.contact.full_name }}</p>
                             {% endif %}
                             {% if task.order_id %}
-                                <p class="task-copy">{% if task.order.title %}{{ task.order.title }}{% else %}Замовлення #{{ task.order_id }}{% endif %}</p>
+                                <p class="task-copy">{% if task.order.title %}{{ task.order.title }}{% else %}Заказ #{{ task.order_id }}{% endif %}</p>
                             {% endif %}
                         </li>
                     {% endfor %}
                 </ul>
             {% else %}
-                <p class="empty">Прострочених задач немає.</p>
+                <p class="empty">Просроченных задач нет.</p>
             {% endif %}
         </article>
-    </section>
 
-    <section class="panel">
-        <span class="eyebrow">Історія</span>
-        <h2>Виконані</h2>
-        {% if completed_tasks %}
-            <ul class="task-list">
-                {% for task in completed_tasks %}
-                    <li class="task-card completed">
-                        <h3>{{ task.title }}</h3>
-                        <div class="task-status-row">
-                            <span class="task-meta">{{ task.date|date:"d.m.Y" }}</span>
-                            <span class="pill healthy">{{ task.get_status_display }}</span>
-                        </div>
-                        {% if task.comment %}
-                            <p>{{ task.comment }}</p>
-                        {% endif %}
-                        <p class="task-copy">Клієнт: {{ task.client.name }}</p>
-                        {% if task.contact %}
-                            <p class="task-copy">Контакт: {{ task.contact.full_name }}</p>
-                        {% endif %}
-                        {% if task.order_id %}
-                            <p class="task-copy">{% if task.order.title %}{{ task.order.title }}{% else %}Замовлення #{{ task.order_id }}{% endif %}</p>
-                        {% endif %}
-                    </li>
-                {% endfor %}
-            </ul>
-        {% else %}
-            <p class="empty">Виконаних задач поки немає.</p>
-        {% endif %}
+        <article class="panel">
+            <span class="eyebrow">History</span>
+            <h2>Выполненные задачи</h2>
+            {% if completed_tasks %}
+                <ul class="task-list">
+                    {% for task in completed_tasks %}
+                        <li class="task-card completed">
+                            <h3>{{ task.title }}</h3>
+                            <div class="task-status-row">
+                                <span class="task-meta">{{ task.date|date:"d.m.Y" }}</span>
+                                <span class="pill healthy">{{ task.get_status_display }}</span>
+                            </div>
+                            {% if task.comment %}
+                                <p>{{ task.comment }}</p>
+                            {% endif %}
+                            <p class="task-copy">Клиент: {{ task.client.name }}</p>
+                            {% if task.contact %}
+                                <p class="task-copy">Контакт: {{ task.contact.full_name }}</p>
+                            {% endif %}
+                            {% if task.order_id %}
+                                <p class="task-copy">{% if task.order.title %}{{ task.order.title }}{% else %}Заказ #{{ task.order_id }}{% endif %}</p>
+                            {% endif %}
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="empty">Выполненных задач пока нет.</p>
+            {% endif %}
+        </article>
     </section>
 {% endblock %}

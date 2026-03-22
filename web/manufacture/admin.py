@@ -5,6 +5,8 @@ from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils.dateparse import parse_datetime
 
+from core.visibility import filter_orders_queryset, filter_slots_queryset, filter_stages_queryset
+
 from .models import (
     Machine,
     ProductionSlot,
@@ -86,6 +88,9 @@ class StageSlotInline(admin.TabularInline):
         "comment",
     )
 
+    def get_queryset(self, request):
+        return filter_slots_queryset(request.user, super().get_queryset(request))
+
 
 @admin.register(ProductionStage)
 class ProductionStageAdmin(admin.ModelAdmin):
@@ -108,6 +113,13 @@ class ProductionStageAdmin(admin.ModelAdmin):
     def order_display(self, obj):
         return obj.order
 
+    def get_queryset(self, request):
+        return filter_stages_queryset(request.user, super().get_queryset(request))
+
+    def save_model(self, request, obj, form, change):
+        obj._changed_by = request.user
+        super().save_model(request, obj, form, change)
+
 
 class ProductionSlotChangeLogInline(admin.TabularInline):
     model = ProductionSlotChangeLog
@@ -118,6 +130,11 @@ class ProductionSlotChangeLogInline(admin.TabularInline):
 
     def has_add_permission(self, request, obj=None):
         return False
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(
+            slot__in=filter_slots_queryset(request.user, ProductionSlot.objects.all())
+        )
 
 
 @admin.register(ProductionSlot)
@@ -207,6 +224,9 @@ class ProductionSlotAdmin(admin.ModelAdmin):
         obj._changed_by = request.user
         super().save_model(request, obj, form, change)
 
+    def get_queryset(self, request):
+        return filter_slots_queryset(request.user, super().get_queryset(request))
+
     @admin.action(description="Повернути вибрані слоти в автопланування")
     def return_to_auto_mode(self, request, queryset):
         for slot in queryset:
@@ -251,3 +271,8 @@ class ProductionSlotChangeLogAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return False
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(
+            order__in=filter_orders_queryset(request.user, self.model.order.field.related_model.objects.all())
+        )

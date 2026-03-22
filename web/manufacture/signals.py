@@ -1,7 +1,8 @@
-from django.db.models.signals import post_delete, post_save, pre_save
+from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
-from crm.models import OrderItem
+from core.request_context import get_current_user
+from crm.models import Order, OrderItem
 from crm.services import sync_order_status_from_production
 
 from .models import (
@@ -42,17 +43,29 @@ def _slot_history_source(instance):
 
 
 def _write_slot_history(instance, *, action, before=None, after=None):
+    changed_by = getattr(instance, "_changed_by", None)
+    if changed_by is None:
+        current_user = get_current_user()
+        if getattr(current_user, "is_authenticated", False):
+            changed_by = current_user
+    order = Order.objects.filter(pk=instance.order_id).first() if getattr(instance, "order_id", None) else None
+    stage = (
+        ProductionStage.objects.filter(pk=instance.stage_id).first() if getattr(instance, "stage_id", None) else None
+    )
+    if action == ProductionSlotChangeLog.Action.DELETED:
+        order = None
+        stage = None
     ProductionSlotChangeLog.objects.create(
         slot=instance if instance.pk and action != ProductionSlotChangeLog.Action.DELETED else None,
         slot_reference=instance.pk,
-        order=instance.order if getattr(instance, "order_id", None) else None,
-        stage=instance.stage if getattr(instance, "stage_id", None) else None,
+        order=order,
+        stage=stage,
         action=action,
         source=_slot_history_source(instance),
         snapshot_before=before or {},
         snapshot_after=after or {},
         note=getattr(instance, "_history_note", ""),
-        changed_by=getattr(instance, "_changed_by", None),
+        changed_by=changed_by,
     )
 
 
@@ -81,8 +94,12 @@ def sync_order_status_after_stage_save(sender, instance, **kwargs):
 
 @receiver(post_delete, sender=ProductionStage)
 def sync_order_status_after_stage_delete(sender, instance, **kwargs):
-    sync_order_status_from_production(instance.order, save=True)
-    request_replan_open_orders()
+    order_id = OrderItem.objects.filter(pk=instance.order_item_id).values_list("order_id", flat=True).first()
+    order = Order.objects.filter(pk=order_id).first() if order_id else None
+    should_sync_order = order is not None and OrderItem.objects.filter(order_id=order.pk).exists()
+    if should_sync_order:
+        sync_order_status_from_production(order, save=True)
+        request_replan_open_orders()
 
 
 @receiver(pre_save, sender=ProductionSlot)
@@ -100,6 +117,21 @@ def prepare_slot_history(sender, instance, **kwargs):
     instance.planning_source = ProductionSlot.PlanningSource.DISPATCHER
     instance.is_locked = True
     instance._history_source = "manual"
+
+
+@receiver(pre_delete, sender=Order)
+def detach_slot_history_order_links(sender, instance, **kwargs):
+    ProductionSlotChangeLog.objects.filter(order_id=instance.pk).update(order=None)
+
+
+@receiver(pre_delete, sender=ProductionStage)
+def detach_slot_history_stage_links(sender, instance, **kwargs):
+    ProductionSlotChangeLog.objects.filter(stage_id=instance.pk).update(stage=None)
+
+
+@receiver(pre_delete, sender=ProductionSlot)
+def detach_slot_history_slot_links(sender, instance, **kwargs):
+    ProductionSlotChangeLog.objects.filter(slot_id=instance.pk).update(slot=None)
 
 
 @receiver(post_save, sender=ProductionSlot)
@@ -124,16 +156,20 @@ def sync_after_slot_save(sender, instance, created, **kwargs):
 
 @receiver(post_delete, sender=ProductionSlot)
 def sync_after_slot_delete(sender, instance, **kwargs):
-    if instance.stage_id:
-        sync_stage_schedule_from_slots(instance.stage, save=True)
-    sync_order_status_from_production(instance.order, save=True)
+    stage = ProductionStage.objects.filter(pk=instance.stage_id).first() if instance.stage_id else None
+    order = Order.objects.filter(pk=instance.order_id).first() if instance.order_id else None
+    if stage is not None:
+        sync_stage_schedule_from_slots(stage, save=True)
+    should_sync_order = order is not None and OrderItem.objects.filter(order_id=order.pk).exists()
+    if should_sync_order:
+        sync_order_status_from_production(order, save=True)
     _write_slot_history(
         instance,
         action=ProductionSlotChangeLog.Action.DELETED,
         before=serialize_slot(instance),
         after={},
     )
-    if not planner_is_active():
+    if should_sync_order and not planner_is_active():
         request_replan_open_orders()
 
 

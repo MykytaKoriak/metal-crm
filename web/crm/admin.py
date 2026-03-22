@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
+
+from core.visibility import filter_clients_queryset, filter_contacts_queryset, filter_orders_queryset, filter_slots_queryset, filter_tasks_queryset
 from .models import Contact, Tag, Order, Task, Product, OrderItem, Client
 from manufacture.models import ProductionSlot
 
@@ -17,12 +19,18 @@ class OrderInline(admin.TabularInline):
     fields = ["status", "deadline", "created_at", "payment_amount"]
     readonly_fields = ["created_at"]
 
+    def get_queryset(self, request):
+        return filter_orders_queryset(request.user, super().get_queryset(request))
+
 
 class TaskInline(admin.TabularInline):
     model = Task
     extra = 0
     fields = ["title", "assigned_to", "assigned_by", "date", "status", "comment"]
     readonly_fields = ["assigned_by", "created_at"]
+
+    def get_queryset(self, request):
+        return filter_tasks_queryset(request.user, super().get_queryset(request))
 
 
 class ContactInline(admin.TabularInline):
@@ -31,6 +39,9 @@ class ContactInline(admin.TabularInline):
     fields = ("full_name", "position", "phone", "email", "source", "created_at")
     readonly_fields = ("created_at",)
     show_change_link = True
+
+    def get_queryset(self, request):
+        return filter_contacts_queryset(request.user, super().get_queryset(request))
 
 
 @admin.register(Client)
@@ -56,6 +67,9 @@ class ClientAdmin(admin.ModelAdmin):
         url = reverse("client_details", args=[obj.id])
         return format_html('<a href="{}">Open</a>', url)
 
+    def get_queryset(self, request):
+        return filter_clients_queryset(request.user, super().get_queryset(request))
+
 
 @admin.register(Contact)
 class ContactAdmin(admin.ModelAdmin):
@@ -73,11 +87,17 @@ class ContactAdmin(admin.ModelAdmin):
         ("Службова інформація", {"fields": ("created_at", "updated_at")}),
     )
 
+    def get_queryset(self, request):
+        return filter_contacts_queryset(request.user, super().get_queryset(request))
+
 
 class ProductionSlotInline(admin.TabularInline):
     model = ProductionSlot
     extra = 0
     fields = ["stage", "machine", "work_unit", "start_datetime", "end_datetime", "comment"]
+
+    def get_queryset(self, request):
+        return filter_slots_queryset(request.user, super().get_queryset(request))
 
 
 @admin.register(Product)
@@ -187,7 +207,11 @@ class OrderAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         if not obj.manager and request.user.is_authenticated:
             obj.manager = request.user
+        obj._changed_by = request.user
         super().save_model(request, obj, form, change)
+
+    def get_queryset(self, request):
+        return filter_orders_queryset(request.user, super().get_queryset(request))
 
     @admin.display(description="Назва замовлення")
     def title_display(self, obj):
@@ -256,8 +280,12 @@ class TaskAdmin(admin.ModelAdmin):
     autocomplete_fields = ["client", "contact", "order", "assigned_to", "assigned_by"]
 
     def get_queryset(self, request):
-        qs = super().get_queryset(request)
+        qs = filter_tasks_queryset(request.user, super().get_queryset(request))
         return qs.select_related("client", "contact", "order", "assigned_to", "assigned_by")
+
+    def save_model(self, request, obj, form, change):
+        obj._changed_by = request.user
+        super().save_model(request, obj, form, change)
 
     @admin.display(description="Назва задачі")
     def title_link(self, obj):

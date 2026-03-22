@@ -1,0 +1,221 @@
+{% extends "core/dashboard_base.html" %}
+
+{% block title %}Заказы в работе{% endblock %}
+{% block eyebrow %}Production report{% endblock %}
+{% block hero_title %}Отчет по незавершенным заказам{% endblock %}
+{% block hero_text %}Все активные заказы с текущим этапом, степенью готовности, дедлайном, ответственными и риском срыва срока.{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ summary.order_count }}</strong>
+        <span>Заказов в работе</span>
+    </div>
+    <div class="chip">
+        <strong>{{ summary.risk_count }}</strong>
+        <span>С риском</span>
+    </div>
+    <div class="chip">
+        <strong>{{ summary.production_count }}</strong>
+        <span>В производстве</span>
+    </div>
+    <div class="chip">
+        <strong>{{ summary.avg_progress }}%</strong>
+        <span>Средняя готовность</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <style>
+        .toolbar-form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: end;
+            margin-bottom: 8px;
+        }
+
+        .field-group {
+            display: grid;
+            gap: 4px;
+            min-width: 160px;
+        }
+
+        .field-group label {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .field-group select {
+            min-height: 32px;
+            padding: 6px 8px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--surface);
+        }
+
+        .progress-line {
+            display: grid;
+            gap: 4px;
+        }
+
+        .progress-track {
+            height: 8px;
+            border-radius: 999px;
+            background: #e7ebf0;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 999px;
+            background: var(--accent);
+        }
+
+        .meta-stack {
+            display: grid;
+            gap: 3px;
+        }
+    </style>
+
+    <section class="panel">
+        <form method="get" class="toolbar-form">
+            <div class="field-group">
+                <label for="manager_id">Менеджер</label>
+                <select id="manager_id" name="manager_id">
+                    <option value="">Все</option>
+                    {% for user in manager_choices %}
+                        <option value="{{ user.id }}"{% if filters.manager_id == user.id|stringformat:"s" %} selected{% endif %}>
+                            {{ user.email|default:user.username }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field-group">
+                <label for="responsible_id">Ответственный этапа</label>
+                <select id="responsible_id" name="responsible_id">
+                    <option value="">Все</option>
+                    {% for user in responsible_choices %}
+                        <option value="{{ user.id }}"{% if filters.responsible_id == user.id|stringformat:"s" %} selected{% endif %}>
+                            {{ user.email|default:user.username }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field-group">
+                <label for="status">Статус заказа</label>
+                <select id="status" name="status">
+                    <option value="">Все активные</option>
+                    {% for value, label in status_choices %}
+                        <option value="{{ value }}"{% if filters.status == value %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field-group">
+                <label for="risk_only">Режим</label>
+                <select id="risk_only" name="risk_only">
+                    <option value="0"{% if not filters.risk_only %} selected{% endif %}>Все заказы</option>
+                    <option value="1"{% if filters.risk_only %} selected{% endif %}>Только с риском</option>
+                </select>
+            </div>
+            <button type="submit">Применить</button>
+            <a class="button-link" href="{% url 'production_orders_in_work_report' %}">Сбросить</a>
+        </form>
+    </section>
+
+    <section class="panel">
+        <div class="panel-head">
+            <div>
+                <span class="eyebrow">Orders in work</span>
+                <h2>Незавершенные заказы</h2>
+            </div>
+        </div>
+        {% if rows %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Заказ</th>
+                        <th>Клиент</th>
+                        <th>Текущий этап</th>
+                        <th>Готовность</th>
+                        <th>Дедлайн</th>
+                        <th>Ответственные</th>
+                        <th>Риск</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td>
+                                <div class="meta-stack">
+                                    <strong>{{ row.order.title|default:"Без названия" }}</strong>
+                                    <span class="muted">{{ row.order.get_status_display }}</span>
+                                    <span class="muted">Приоритет: {{ row.order.get_priority_display }}</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="meta-stack">
+                                    <strong>{{ row.order.contact.full_name }}</strong>
+                                    {% if row.order.contact.client %}
+                                        <span class="muted">{{ row.order.contact.client.name }}</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="meta-stack">
+                                    <strong>{{ row.current_stage_label }}</strong>
+                                    {% if row.current_stage_row %}
+                                        <span class="muted">{{ row.current_stage_row.resource_label|default:"Ресурс не назначен" }}</span>
+                                        <span class="muted">
+                                            {% if row.current_stage_row.planned_start %}{{ row.current_stage_row.planned_start|date:"d.m.Y H:i" }}{% endif %}
+                                            {% if row.current_stage_row.planned_end %} - {{ row.current_stage_row.planned_end|date:"d.m.Y H:i" }}{% endif %}
+                                        </span>
+                                    {% else %}
+                                        <span class="muted">Активного этапа нет</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="progress-line">
+                                    <strong>{{ row.progress_percent }}%</strong>
+                                    <div class="progress-track">
+                                        <div class="progress-fill" style="width: {{ row.progress_percent }}%"></div>
+                                    </div>
+                                    <span class="muted">{{ row.terminal_stage_count }} / {{ row.total_stages }} этапов закрыто</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="meta-stack">
+                                    <strong>{% if row.deadline %}{{ row.deadline|date:"d.m.Y" }}{% else %}—{% endif %}</strong>
+                                    {% if row.days_to_deadline is not None %}
+                                        <span class="muted">До дедлайна: {{ row.days_to_deadline }} дн.</span>
+                                    {% endif %}
+                                    {% if row.planned_completion %}
+                                        <span class="muted">План финала: {{ row.planned_completion|date:"d.m.Y H:i" }}</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="meta-stack">
+                                    <span>Менеджер: {% if row.order.manager %}{{ row.order.manager.email|default:row.order.manager.username }}{% else %}—{% endif %}</span>
+                                    <span>Этап: {% if row.current_responsible %}{{ row.current_responsible.email|default:row.current_responsible.username }}{% else %}—{% endif %}</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="meta-stack">
+                                    <span class="pill {{ row.risk_level }}">{{ row.risk_label }}</span>
+                                    {% for reason in row.risk_reasons %}
+                                        <span class="muted">{{ reason }}</span>
+                                    {% endfor %}
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="empty">За выбранными фильтрами заказов в работе нет.</p>
+        {% endif %}
+    </section>
+{% endblock %}

@@ -563,3 +563,73 @@ class TestOrderModuleBehavior(CrmWorkspaceMixin, TestCase):
         self.assertContains(response, reverse("crm_order_update", args=[visible_order.id]))
         self.assertNotContains(response, reverse("crm_order_update", args=[other_order.id]))
         self.assertEqual(response.context["stats"]["total_orders"], 1)
+
+
+class TestRowLevelVisibility(CrmWorkspaceMixin, TestCase):
+    def setUp(self):
+        self.manager = self.create_user_with_role("row-manager@example.com", UserProfile.Role.SALES_MANAGER)
+        self.other_manager = self.create_user_with_role("row-other@example.com", UserProfile.Role.SALES_MANAGER)
+        self.shared_client = Client.objects.create(name="Shared Client", phones="+380679999999")
+        self.shared_contact = Contact.objects.create(client=self.shared_client, full_name="Shared Contact")
+
+        self.my_order = self.create_order(self.shared_contact, manager=self.manager)
+        self.other_order = self.create_order(self.shared_contact, manager=self.other_manager)
+
+        self.my_task = Task.objects.create(
+            client=self.shared_client,
+            contact=self.shared_contact,
+            order=self.my_order,
+            title="My visible task",
+            assigned_by=self.manager,
+            assigned_to=self.manager,
+            date=timezone.localdate(),
+            status=Task.Status.NEW,
+        )
+        self.other_task = Task.objects.create(
+            client=self.shared_client,
+            contact=self.shared_contact,
+            order=self.other_order,
+            title="Other hidden task",
+            assigned_by=self.other_manager,
+            assigned_to=self.other_manager,
+            date=timezone.localdate(),
+            status=Task.Status.NEW,
+        )
+
+    def test_sales_manager_only_sees_owned_orders_and_related_tasks_in_lists_and_card(self):
+        self.client.force_login(self.manager)
+
+        orders_response = self.client.get(reverse("crm_orders"))
+        self.assertEqual(orders_response.status_code, 200)
+        self.assertContains(orders_response, self.my_order.title)
+        self.assertNotContains(orders_response, self.other_order.title)
+
+        tasks_response = self.client.get(reverse("crm_tasks"))
+        self.assertEqual(tasks_response.status_code, 200)
+        self.assertContains(tasks_response, "My visible task")
+        self.assertNotContains(tasks_response, "Other hidden task")
+
+        details_response = self.client.get(reverse("client_details", args=[self.shared_client.id]))
+        self.assertEqual(details_response.status_code, 200)
+        self.assertContains(details_response, self.my_order.title)
+        self.assertNotContains(details_response, self.other_order.title)
+        self.assertContains(details_response, "My visible task")
+        self.assertNotContains(details_response, "Other hidden task")
+        self.assertEqual(details_response.context["stats"]["orders_count"], 1)
+        self.assertEqual(details_response.context["stats"]["tasks_count"], 1)
+
+    def test_sales_manager_cannot_open_or_mutate_another_managers_objects(self):
+        self.client.force_login(self.manager)
+
+        order_response = self.client.get(reverse("crm_order_update", args=[self.other_order.id]))
+        self.assertEqual(order_response.status_code, 404)
+
+        task_response = self.client.get(reverse("crm_task_update", args=[self.other_task.id]))
+        self.assertEqual(task_response.status_code, 404)
+
+        status_response = self.client.post(
+            reverse("crm_task_status_update", args=[self.other_task.id]),
+            {"status": Task.Status.DONE},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(status_response.status_code, 404)

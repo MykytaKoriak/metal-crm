@@ -2,6 +2,10 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.forms import BaseInlineFormSet, inlineformset_factory
 
+from core.access import get_user_role
+from core.models import UserProfile
+from core.visibility import filter_clients_queryset, filter_contacts_queryset, filter_orders_queryset
+
 from .models import Client, Contact, Order, OrderItem, Product, Task
 
 
@@ -25,8 +29,12 @@ class ClientForm(StyledModelForm):
 
 class ContactForm(StyledModelForm):
     def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop("user", None)
         super().__init__(*args, **kwargs)
-        self.fields["client"].queryset = Client.objects.order_by("name")
+        self.fields["client"].queryset = filter_clients_queryset(
+            self.user,
+            Client.objects.order_by("name"),
+        )
 
     class Meta:
         model = Contact
@@ -57,10 +65,11 @@ class ProductForm(StyledModelForm):
 
 class TaskForm(StyledModelForm):
     def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop("user", None)
         super().__init__(*args, **kwargs)
         user_model = get_user_model()
         active_users = user_model.objects.filter(is_active=True).order_by("email", "username")
-        self.fields["client"].queryset = Client.objects.order_by("name")
+        self.fields["client"].queryset = filter_clients_queryset(self.user, Client.objects.order_by("name"))
         self.fields["assigned_by"].queryset = active_users
         self.fields["assigned_to"].queryset = active_users
 
@@ -76,8 +85,8 @@ class TaskForm(StyledModelForm):
             elif initial_client:
                 selected_client_id = str(initial_client)
 
-        contacts = Contact.objects.select_related("client")
-        orders = Order.objects.select_related("contact", "contact__client")
+        contacts = filter_contacts_queryset(self.user, Contact.objects.select_related("client"))
+        orders = filter_orders_queryset(self.user, Order.objects.select_related("contact", "contact__client"))
         if selected_client_id and str(selected_client_id).isdigit():
             contacts = contacts.filter(client_id=int(selected_client_id))
             orders = orders.filter(contact__client_id=int(selected_client_id))
@@ -95,16 +104,30 @@ class TaskForm(StyledModelForm):
 
 class OrderForm(StyledModelForm):
     def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop("user", None)
         super().__init__(*args, **kwargs)
         user_model = get_user_model()
-        self.fields["contact"].queryset = Contact.objects.select_related("client").order_by("client__name", "full_name")
-        self.fields["manager"].queryset = user_model.objects.filter(is_active=True).order_by("email", "username")
+        self.fields["contact"].queryset = filter_contacts_queryset(
+            self.user,
+            Contact.objects.select_related("client").order_by("client__name", "full_name"),
+        )
+        manager_queryset = user_model.objects.filter(is_active=True).order_by("email", "username")
+        if get_user_role(self.user) == UserProfile.Role.SALES_MANAGER:
+            manager_queryset = manager_queryset.filter(pk=self.user.pk)
+            self.initial["manager"] = self.user.pk
+        self.fields["manager"].queryset = manager_queryset
         self.fields["manager"].required = True
         self.fields["priority"].required = False
         self.initial.setdefault("priority", Order.Priority.NORMAL)
 
     def clean_priority(self):
         return self.cleaned_data.get("priority") or Order.Priority.NORMAL
+
+    def clean_manager(self):
+        manager = self.cleaned_data.get("manager")
+        if get_user_role(self.user) == UserProfile.Role.SALES_MANAGER:
+            return self.user
+        return manager
 
     class Meta:
         model = Order

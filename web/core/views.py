@@ -1,6 +1,13 @@
+import json
+
+from django.conf import settings
+from django.contrib import messages
 from django.db.models import Count, Q
+from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 
 from crm.models import Task
 
@@ -11,7 +18,9 @@ from .dashboard import (
     get_production_dashboard_context,
     get_sales_dashboard_context,
 )
+from .forms import TelegramPreferencesForm
 from .models import UserProfile
+from .telegram.handlers import process_update
 
 
 ROLE_DASHBOARD_NAMES = {
@@ -79,8 +88,22 @@ def my_account(request):
         "stats": stats,
         "today": today,
         "active_section": "account",
+        "telegram_preferences_form": TelegramPreferencesForm(instance=profile),
     }
     return render(request, "core/my_account.html", context)
+
+
+@roles_required(*INTERNAL_ROLES)
+@require_POST
+def update_telegram_preferences(request):
+    profile = _get_profile(request.user)
+    form = TelegramPreferencesForm(request.POST, instance=profile)
+    if form.is_valid():
+        form.save()
+        messages.success(request, "Telegram settings updated.")
+    else:
+        messages.error(request, "Unable to save Telegram settings.")
+    return redirect("my_account")
 
 
 @roles_required(UserProfile.Role.ADMIN)
@@ -109,3 +132,21 @@ def executive_dashboard(request):
     context = _dashboard_shell_context(request)
     context.update(get_executive_dashboard_context())
     return render(request, "core/executive_dashboard.html", context)
+
+
+@csrf_exempt
+@require_POST
+def telegram_webhook(request):
+    secret = (getattr(settings, "TELEGRAM_WEBHOOK_SECRET", "") or "").strip()
+    if secret:
+        received_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if received_secret != secret:
+            return JsonResponse({"ok": False, "error": "invalid secret"}, status=403)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return HttpResponseBadRequest("Invalid JSON payload.")
+
+    process_update(payload)
+    return JsonResponse({"ok": True})

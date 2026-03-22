@@ -146,6 +146,7 @@
             <div class="link-row">
                 <a href="{% url 'production_free_slot_report' %}?resource_kind={{ filters.resource_kind }}{% if filters.resource_id %}&resource_id={{ filters.resource_id }}{% endif %}">Звіт по вільних слотах</a>
                 <a href="{% url 'production_overdue_stage_report' %}?resource_kind={{ filters.resource_kind }}{% if filters.resource_id %}&resource_id={{ filters.resource_id }}{% endif %}">Звіт по прострочених етапах</a>
+                <a href="{% url 'production_orders_in_work_report' %}">Звіт по замовленнях</a>
                 <a href="{% url 'machine_load_report' %}">Перегруз ресурсів</a>
             </div>
         </div>

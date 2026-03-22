@@ -1,4 +1,5 @@
 from datetime import datetime, time, timedelta
+from unittest.mock import patch
 from uuid import uuid4
 
 from django.conf import settings
@@ -9,8 +10,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from crm.models import Client, Contact, Order, OrderItem, Product, Task
-from manufacture.models import Machine, ProductionSlot, ProductionStage
-from .models import UserProfile
+from manufacture.models import Machine, ProductionSlot, ProductionStage, WorkUnit
+from .models import ChangeAuditLog, TelegramNotification, TelegramUpdateLog, UserProfile
 
 
 class TestUserProfile(TestCase):
@@ -128,6 +129,7 @@ class TestRoleAccessMatrix(TestCase):
         self.assertTrue(user.has_perm("manufacture.change_productionstage"))
         self.assertTrue(user.has_perm("manufacture.delete_productionslot"))
         self.assertTrue(user.has_perm("auth.change_user"))
+        self.assertTrue(user.has_perm("core.view_changeauditlog"))
 
     def test_sales_manager_has_crm_and_read_only_production(self):
         user = self.create_user_with_role("sales-role@example.com", UserProfile.Role.SALES_MANAGER)
@@ -156,6 +158,7 @@ class TestRoleAccessMatrix(TestCase):
         self.assertTrue(user.has_perm("manufacture.view_machine"))
         self.assertFalse(user.has_perm("manufacture.change_machine"))
         self.assertFalse(user.has_perm("crm.add_client"))
+        self.assertFalse(user.has_perm("core.view_changeauditlog"))
 
 
 class TestProtectedProductionViews(TestCase):
@@ -444,3 +447,432 @@ class TestExecutiveDashboard(DashboardTestMixin, TestCase):
         self.assertEqual(response.context["new_orders_count"], 1)
         self.assertEqual(response.context["monthly_revenue"][-1]["revenue"], 420)
         self.assertContains(response, "Executive Client")
+
+    def test_executive_dashboard_shows_problem_zones_and_conversion(self):
+        user = self.create_user_with_role("executive-risk@example.com", UserProfile.Role.EXECUTIVE)
+        manager = self.create_user_with_role("manager-risk@example.com", UserProfile.Role.SALES_MANAGER)
+        client = Client.objects.create(name="Risk Client", email="risk-client@example.com")
+        contact = Contact.objects.create(client=client, full_name="Risk Contact")
+        today = timezone.localdate()
+
+        risk_order = self.create_order(
+            contact,
+            manager=manager,
+            status=Order.Status.IN_PRODUCTION,
+            deadline=today + timedelta(days=1),
+            unit_price="500.00",
+        )
+        ready_order = self.create_order(
+            contact,
+            manager=manager,
+            status=Order.Status.READY,
+            deadline=today + timedelta(days=3),
+            unit_price="300.00",
+        )
+
+        risk_stage = risk_order.items.first().production_stages.get(
+            stage_type=ProductionStage.StageType.EXECUTION
+        )
+        risk_stage.status = ProductionStage.Status.IN_PROGRESS
+        risk_stage.planned_start = timezone.now() - timedelta(days=2)
+        risk_stage.planned_end = timezone.now() - timedelta(hours=3)
+        risk_stage.started_at = timezone.now() - timedelta(days=1)
+        risk_stage.responsible = manager
+        risk_stage.save(
+            update_fields=["status", "planned_start", "planned_end", "started_at", "responsible", "updated_at"]
+        )
+
+        Task.objects.create(
+            client=client,
+            contact=contact,
+            order=risk_order,
+            title="Waiting executive task",
+            assigned_by=user,
+            assigned_to=manager,
+            date=today - timedelta(days=2),
+            status=Task.Status.WAITING,
+        )
+
+        critical_machine = Machine.objects.create(
+            name="Critical Laser",
+            type=Machine.MachineType.LASER,
+            available_weekdays="0,1,2,3,4,5,6",
+            workday_start=time(8, 0),
+            workday_end=time(9, 0),
+        )
+        for offset in range(8):
+            day = today + timedelta(days=offset)
+            slot = ProductionSlot(
+                order=ready_order,
+                machine=critical_machine,
+                start_datetime=timezone.make_aware(datetime.combine(day, time(8, 0))),
+                end_datetime=timezone.make_aware(datetime.combine(day, time(9, 0))),
+                slot_type=ProductionSlot.SlotType.RESERVATION,
+                planning_mode=ProductionSlot.PlanningMode.MANUAL,
+                planning_source=ProductionSlot.PlanningSource.ADMIN,
+                is_locked=True,
+                purpose="Executive load test",
+            )
+            slot._planner_operation = True
+            slot.save()
+
+        self.client.force_login(user)
+        response = self.client.get(reverse("executive_dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(response.context["executive_summary"]["at_risk_order_count"], 1)
+        self.assertGreaterEqual(response.context["executive_summary"]["critical_resource_count"], 1)
+        self.assertGreaterEqual(response.context["executive_summary"]["stalled_task_count"], 1)
+        self.assertGreater(response.context["executive_summary"]["in_production_share"], 0)
+        self.assertTrue(any(row["count"] for row in response.context["order_status_rows"]))
+        self.assertContains(response, risk_order.title)
+        self.assertContains(response, "Waiting executive task")
+
+
+class TestTelegramWebhook(DashboardTestMixin, TestCase):
+    def setUp(self):
+        self.user = self.create_user_with_role("telegram-link@example.com", UserProfile.Role.SALES_MANAGER)
+        self.profile = self.user.profile
+        self.profile.full_name = "Telegram Manager"
+        self.profile.save()
+
+    @patch("core.telegram.handlers.send_message")
+    def test_webhook_links_profile_by_code(self, send_message_mock):
+        payload = {
+            "update_id": 1001,
+            "message": {
+                "message_id": 1,
+                "text": f"/link {self.profile.telegram_link_code}",
+                "chat": {"id": 555001},
+                "from": {"id": 77, "username": "crm_user"},
+            },
+        }
+
+        response = self.client.post(
+            reverse("telegram_webhook"),
+            data=payload,
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.telegram_chat_id, "555001")
+        self.assertEqual(self.profile.telegram_username, "crm_user")
+        self.assertTrue(TelegramUpdateLog.objects.filter(update_id=1001).exists())
+        send_message_mock.assert_called_once()
+
+    @patch("core.telegram.handlers.send_message")
+    def test_webhook_returns_tasks_for_linked_chat(self, send_message_mock):
+        today = timezone.localdate()
+        self.profile.telegram_chat_id = "555001"
+        self.profile.save(update_fields=["telegram_chat_id"])
+
+        client = Client.objects.create(name="Telegram Client", email="telegram-client@example.com")
+        contact = Contact.objects.create(client=client, full_name="Telegram Contact")
+        Task.objects.create(
+            client=client,
+            contact=contact,
+            title="Telegram task",
+            assigned_by=self.user,
+            assigned_to=self.user,
+            date=today,
+            status=Task.Status.NEW,
+        )
+
+        payload = {
+            "update_id": 1002,
+            "message": {
+                "message_id": 2,
+                "text": "/tasks",
+                "chat": {"id": 555001},
+                "from": {"id": 77, "username": "crm_user"},
+            },
+        }
+
+        response = self.client.post(
+            reverse("telegram_webhook"),
+            data=payload,
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        send_args, send_kwargs = send_message_mock.call_args
+        self.assertEqual(send_args[0], "555001")
+        self.assertIn("Telegram task", send_args[1])
+        self.assertIn("reply_markup", send_kwargs)
+
+
+class TestTelegramNotifications(DashboardTestMixin, TestCase):
+    def setUp(self):
+        self.manager = self.create_user_with_role("telegram-manager@example.com", UserProfile.Role.SALES_MANAGER)
+        self.manager.profile.telegram_chat_id = "70001"
+        self.manager.profile.save(update_fields=["telegram_chat_id"])
+
+        self.production_user = self.create_user_with_role("telegram-production@example.com", UserProfile.Role.PRODUCTION)
+        self.production_user.profile.telegram_chat_id = "70002"
+        self.production_user.profile.save(update_fields=["telegram_chat_id"])
+
+        self.client_entity = Client.objects.create(name="Notify Client", email="notify@example.com")
+        self.contact = Contact.objects.create(client=self.client_entity, full_name="Notify Contact")
+
+    def test_task_creation_queues_notification(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            task = Task.objects.create(
+                client=self.client_entity,
+                contact=self.contact,
+                title="Notify task",
+                assigned_by=self.manager,
+                assigned_to=self.manager,
+                date=timezone.localdate() + timedelta(days=1),
+                status=Task.Status.NEW,
+            )
+
+        notification = TelegramNotification.objects.get(task=task, notification_type=TelegramNotification.Type.TASK_CREATED)
+        self.assertEqual(notification.profile, self.manager.profile)
+        self.assertEqual(notification.status, TelegramNotification.Status.PENDING)
+
+    def test_order_status_change_queues_notification(self):
+        order = self.create_order(
+            self.contact,
+            manager=self.manager,
+            status=Order.Status.NEW,
+            deadline=timezone.localdate() + timedelta(days=4),
+            unit_price="320.00",
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            order.status = Order.Status.IN_PRODUCTION
+            order.save(update_fields=["status"])
+
+        notification = TelegramNotification.objects.get(order=order, notification_type=TelegramNotification.Type.ORDER_STATUS)
+        self.assertEqual(notification.profile, self.manager.profile)
+        self.assertIn("IN_PRODUCTION".lower(), notification.dedupe_key)
+
+    def test_stage_status_change_queues_production_notification(self):
+        order = self.create_order(
+            self.contact,
+            manager=self.manager,
+            status=Order.Status.IN_PRODUCTION,
+            deadline=timezone.localdate() + timedelta(days=2),
+            unit_price="410.00",
+        )
+        stage = order.items.first().production_stages.get(stage_type=ProductionStage.StageType.EXECUTION)
+        stage.responsible = self.production_user
+        stage.save(update_fields=["responsible", "updated_at"])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            stage.status = ProductionStage.Status.IN_PROGRESS
+            stage.started_at = timezone.now()
+            stage.save(update_fields=["status", "started_at", "updated_at"])
+
+        notifications = TelegramNotification.objects.filter(
+            stage=stage,
+            notification_type=TelegramNotification.Type.PRODUCTION_EVENT,
+        )
+        self.assertEqual(notifications.count(), 2)
+
+    @patch("core.telegram.services.send_message")
+    def test_process_notification_queue_sends_and_deduplicates_deadline_reminders(self, send_message_mock):
+        task = Task.objects.create(
+            client=self.client_entity,
+            contact=self.contact,
+            title="Deadline task",
+            assigned_by=self.manager,
+            assigned_to=self.manager,
+            date=timezone.localdate() + timedelta(days=1),
+            status=Task.Status.IN_PROGRESS,
+        )
+        order = self.create_order(
+            self.contact,
+            manager=self.manager,
+            status=Order.Status.IN_PROGRESS,
+            deadline=timezone.localdate() + timedelta(days=1),
+            unit_price="150.00",
+        )
+
+        send_message_mock.return_value = {"message_id": 99}
+
+        from core.telegram.services import process_notification_queue
+
+        result_first = process_notification_queue(now=timezone.now(), limit=20)
+        result_second = process_notification_queue(now=timezone.now(), limit=20)
+
+        self.assertEqual(result_first["queued"], 2)
+        self.assertEqual(result_first["delivered"], 2)
+        self.assertEqual(result_second["queued"], 0)
+        self.assertGreaterEqual(send_message_mock.call_count, 2)
+        self.assertTrue(
+            TelegramNotification.objects.filter(task=task, notification_type=TelegramNotification.Type.TASK_DEADLINE).exists()
+        )
+        self.assertTrue(
+            TelegramNotification.objects.filter(order=order, notification_type=TelegramNotification.Type.ORDER_DEADLINE).exists()
+        )
+
+    def test_account_page_updates_telegram_preferences(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            reverse("update_telegram_preferences"),
+            data={
+                "telegram_notifications_enabled": "on",
+                "telegram_notify_deadlines": "on",
+                "telegram_notify_order_updates": "on",
+            },
+        )
+
+        self.assertRedirects(response, reverse("my_account"))
+        self.manager.profile.refresh_from_db()
+        self.assertTrue(self.manager.profile.telegram_notifications_enabled)
+        self.assertFalse(self.manager.profile.telegram_notify_new_tasks)
+        self.assertTrue(self.manager.profile.telegram_notify_deadlines)
+        self.assertFalse(self.manager.profile.telegram_notify_overdue)
+        self.assertTrue(self.manager.profile.telegram_notify_order_updates)
+        self.assertFalse(self.manager.profile.telegram_notify_production_events)
+
+
+class TestChangeAuditLog(DashboardTestMixin, TestCase):
+    def setUp(self):
+        self.manager = self.create_user_with_role("audit-manager@example.com", UserProfile.Role.SALES_MANAGER)
+        self.production_user = self.create_user_with_role("audit-production@example.com", UserProfile.Role.PRODUCTION)
+        self.client_entity = Client.objects.create(name="Audit Client", email="audit-client@example.com")
+        self.contact = Contact.objects.create(client=self.client_entity, full_name="Audit Contact")
+        self.storage = WorkUnit.objects.create(name="Audit Storage", type=WorkUnit.UnitType.STORAGE)
+        self.assembly = WorkUnit.objects.create(name="Audit Assembly", type=WorkUnit.UnitType.ASSEMBLY)
+        self.laser = Machine.objects.create(name="Audit Laser", type=Machine.MachineType.LASER)
+        self.paint = Machine.objects.create(name="Audit Paint", type=Machine.MachineType.PAINTING)
+
+    def create_order_with_item(self):
+        product = Product.objects.create(name=f"Audit Product {uuid4().hex[:6]}", sku=f"AUD-{uuid4().hex[:8]}")
+        with self.captureOnCommitCallbacks(execute=True):
+            order = Order.objects.create(
+                contact=self.contact,
+                manager=self.manager,
+                status=Order.Status.NEW,
+                deadline=timezone.localdate() + timedelta(days=3),
+            )
+            OrderItem.objects.create(order=order, product=product, quantity=1, unit_price="250.00")
+        return Order.objects.get(pk=order.pk)
+
+    def test_order_and_task_changes_are_logged_with_actor_and_fields(self):
+        order = self.create_order_with_item()
+
+        created_order_log = ChangeAuditLog.objects.filter(
+            entity_type=ChangeAuditLog.EntityType.ORDER,
+            action=ChangeAuditLog.Action.CREATED,
+            object_id=order.pk,
+        ).first()
+        self.assertIsNotNone(created_order_log)
+        self.assertEqual(created_order_log.order_id, order.pk)
+
+        order._changed_by = self.manager
+        order.priority = Order.Priority.URGENT
+        order.comment = "Escalated to production"
+        order.save(update_fields=["priority", "comment"])
+
+        updated_order_log = ChangeAuditLog.objects.filter(
+            entity_type=ChangeAuditLog.EntityType.ORDER,
+            action=ChangeAuditLog.Action.UPDATED,
+            object_id=order.pk,
+        ).first()
+        self.assertIsNotNone(updated_order_log)
+        self.assertEqual(updated_order_log.changed_by, self.manager)
+        self.assertIn("priority", updated_order_log.changed_fields)
+        self.assertIn("comment", updated_order_log.changed_fields)
+
+        task = Task(
+            client=self.client_entity,
+            contact=self.contact,
+            order=order,
+            title="Audit task",
+            assigned_by=self.manager,
+            assigned_to=self.manager,
+            date=timezone.localdate(),
+            status=Task.Status.NEW,
+        )
+        task._changed_by = self.manager
+        task.save()
+
+        created_task_log = ChangeAuditLog.objects.filter(
+            entity_type=ChangeAuditLog.EntityType.TASK,
+            action=ChangeAuditLog.Action.CREATED,
+            object_id=task.pk,
+        ).first()
+        self.assertIsNotNone(created_task_log)
+        self.assertEqual(created_task_log.changed_by, self.manager)
+
+        task_id = task.pk
+        task._changed_by = self.manager
+        task.delete()
+
+        deleted_task_log = ChangeAuditLog.objects.filter(
+            entity_type=ChangeAuditLog.EntityType.TASK,
+            action=ChangeAuditLog.Action.DELETED,
+            object_id=task_id,
+        ).first()
+        self.assertIsNotNone(deleted_task_log)
+        self.assertEqual(deleted_task_log.changed_by, self.manager)
+        self.assertIn("status", deleted_task_log.snapshot_before)
+
+    def test_stage_slot_and_cascade_deletes_are_logged(self):
+        order = self.create_order_with_item()
+        stage = order.items.first().production_stages.get(stage_type=ProductionStage.StageType.EXECUTION)
+        slot = order.slots.order_by("id").first()
+        self.assertIsNotNone(slot)
+
+        stage._changed_by = self.production_user
+        stage.status = ProductionStage.Status.IN_PROGRESS
+        stage.started_at = timezone.now()
+        stage.save(update_fields=["status", "started_at", "updated_at"])
+
+        updated_stage_log = ChangeAuditLog.objects.filter(
+            entity_type=ChangeAuditLog.EntityType.PRODUCTION_STAGE,
+            action=ChangeAuditLog.Action.UPDATED,
+            object_id=stage.pk,
+        ).first()
+        self.assertIsNotNone(updated_stage_log)
+        self.assertEqual(updated_stage_log.changed_by, self.production_user)
+        self.assertIn("status", updated_stage_log.changed_fields)
+
+        slot._changed_by = self.production_user
+        slot.dispatcher_comment = "Dispatcher note"
+        slot.save()
+
+        updated_slot_log = ChangeAuditLog.objects.filter(
+            entity_type=ChangeAuditLog.EntityType.PRODUCTION_SLOT,
+            action=ChangeAuditLog.Action.UPDATED,
+            object_id=slot.pk,
+        ).first()
+        self.assertIsNotNone(updated_slot_log)
+        self.assertEqual(updated_slot_log.changed_by, self.production_user)
+        self.assertIn("dispatcher_comment", updated_slot_log.changed_fields)
+
+        order_id = order.pk
+        stage_ids = list(order.items.first().production_stages.values_list("id", flat=True))
+        slot_ids = list(order.slots.values_list("id", flat=True))
+
+        order._changed_by = self.manager
+        order.delete()
+
+        self.assertTrue(
+            ChangeAuditLog.objects.filter(
+                entity_type=ChangeAuditLog.EntityType.ORDER,
+                action=ChangeAuditLog.Action.DELETED,
+                object_id=order_id,
+            ).exists()
+        )
+        self.assertEqual(
+            ChangeAuditLog.objects.filter(
+                entity_type=ChangeAuditLog.EntityType.PRODUCTION_STAGE,
+                action=ChangeAuditLog.Action.DELETED,
+                object_id__in=stage_ids,
+            ).count(),
+            len(stage_ids),
+        )
+        self.assertEqual(
+            ChangeAuditLog.objects.filter(
+                entity_type=ChangeAuditLog.EntityType.PRODUCTION_SLOT,
+                action=ChangeAuditLog.Action.DELETED,
+                object_id__in=slot_ids,
+            ).count(),
+            len(slot_ids),
+        )

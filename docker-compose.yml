@@ -32,6 +32,19 @@ services:
     ports:
       - "8000:8000"
 
+  telegram:
+    build: .
+    restart: unless-stopped
+    command: >
+      sh -c "python manage.py run_telegram_bot --poll-timeout 30 --notify-limit 100 --retry-delay 5"
+    volumes:
+      - ./web:/app/web
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - web
+
 volumes:
   postgres_data:
   static_volume:

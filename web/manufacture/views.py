@@ -1,5 +1,6 @@
 from datetime import datetime, time, timedelta
 
+from django.contrib.auth import get_user_model
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -7,10 +8,19 @@ from django.utils.timezone import get_current_timezone, localtime, make_aware
 
 from core.access import INTERNAL_ROLES, roles_required
 from core.models import UserProfile
+from core.visibility import (
+    filter_orders_queryset,
+    filter_slots_queryset,
+    filter_stages_queryset,
+    visible_manager_choices_queryset,
+    visible_responsible_choices_queryset,
+)
+from crm.models import Order
 
 from .models import Machine, ProductionSlot, ProductionStage, ResourceDowntime, WorkUnit
 from .services import (
     build_free_slot_report,
+    build_orders_in_work_report,
     build_overdue_stage_report,
     get_resource_busy_seconds,
     get_resource_capacity_seconds,
@@ -142,11 +152,16 @@ def machine_detail_report(request, machine_id):
     tz = get_current_timezone()
     today = datetime.now(tz).date()
     machine = get_object_or_404(Machine, pk=machine_id)
+    visible_slots = filter_slots_queryset(
+        request.user,
+        ProductionSlot.objects.exclude(start_datetime__isnull=True)
+        .exclude(end_datetime__isnull=True),
+    )
 
     days = []
     for offset in range(8):
         day = today + timedelta(days=offset)
-        plan = get_resource_day_plan(machine, day)
+        plan = get_resource_day_plan(machine, day, slot_queryset=visible_slots)
         days.append(
             {
                 "date": day,
@@ -172,11 +187,16 @@ def workunit_detail_report(request, workunit_id):
     tz = get_current_timezone()
     today = datetime.now(tz).date()
     work_unit = get_object_or_404(WorkUnit, pk=workunit_id)
+    visible_slots = filter_slots_queryset(
+        request.user,
+        ProductionSlot.objects.exclude(start_datetime__isnull=True)
+        .exclude(end_datetime__isnull=True),
+    )
 
     days = []
     for offset in range(8):
         day = today + timedelta(days=offset)
-        plan = get_resource_day_plan(work_unit, day)
+        plan = get_resource_day_plan(work_unit, day, slot_queryset=visible_slots)
         days.append(
             {
                 "date": day,
@@ -244,6 +264,7 @@ def production_overdue_stage_report(request):
         now=timezone.now(),
         resource_kind=resource_kind,
         resource_id=resource_id or None,
+        user=request.user,
     )
 
     context = _dashboard_shell_context(request)
@@ -264,15 +285,69 @@ def production_overdue_stage_report(request):
     return render(request, "manufacture/overdue_stage_report.html", context)
 
 
+@roles_required(*INTERNAL_ROLES)
+def production_orders_in_work_report(request):
+    manager_id = request.GET.get("manager_id", "").strip()
+    responsible_id = request.GET.get("responsible_id", "").strip()
+    order_status = request.GET.get("status", "").strip()
+    risk_only = request.GET.get("risk_only") == "1"
+
+    rows = build_orders_in_work_report(
+        now=timezone.now(),
+        manager_id=manager_id or None,
+        responsible_id=responsible_id or None,
+        status=order_status or None,
+        risk_only=risk_only,
+        user=request.user,
+    )
+
+    users = get_user_model().objects.filter(is_active=True).order_by("email", "username")
+    manager_choices = visible_manager_choices_queryset(
+        request.user,
+        users.filter(managed_orders__isnull=False).distinct(),
+    )
+    responsible_choices = visible_responsible_choices_queryset(
+        request.user,
+        users.filter(production_stages__isnull=False).distinct(),
+    )
+
+    context = _dashboard_shell_context(request)
+    context.update(
+        {
+            "filters": {
+                "manager_id": manager_id,
+                "responsible_id": responsible_id,
+                "status": order_status,
+                "risk_only": risk_only,
+            },
+            "rows": rows,
+            "manager_choices": manager_choices,
+            "responsible_choices": responsible_choices,
+            "status_choices": Order.Status.choices,
+            "summary": {
+                "order_count": len(rows),
+                "risk_count": sum(1 for row in rows if row["is_at_risk"]),
+                "production_count": sum(1 for row in rows if row["order"].status == Order.Status.IN_PRODUCTION),
+                "avg_progress": round(
+                    (sum(row["progress_percent"] for row in rows) / len(rows)) if rows else 0,
+                    1,
+                ),
+            },
+        }
+    )
+    return render(request, "manufacture/orders_in_work_report.html", context)
+
+
 @roles_required(UserProfile.Role.ADMIN, UserProfile.Role.PRODUCTION)
 def production_stage_status_update(request, stage_id):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
 
-    stage = get_object_or_404(ProductionStage, pk=stage_id)
+    stage = get_object_or_404(filter_stages_queryset(request.user, ProductionStage.objects.all()), pk=stage_id)
     next_url = request.POST.get("next") or "production_dashboard"
     status = request.POST.get("status", "").strip()
     note = request.POST.get("note", "").strip()
+    stage._changed_by = request.user
     update_stage_status(stage, status, note=note)
     return redirect(next_url)
 
@@ -280,10 +355,11 @@ def production_stage_status_update(request, stage_id):
 @roles_required(*INTERNAL_ROLES)
 def production_slot_events(request):
     resource_kind, resource_id = _normalize_resource_filters(request)
-    slot_qs = (
+    slot_qs = filter_slots_queryset(
+        request.user,
         ProductionSlot.objects.exclude(start_datetime__isnull=True)
         .exclude(end_datetime__isnull=True)
-        .select_related("order", "stage", "stage__order_item", "stage__order_item__product", "machine", "work_unit")
+        .select_related("order", "stage", "stage__order_item", "stage__order_item__product", "machine", "work_unit"),
     )
     downtime_qs = ResourceDowntime.objects.filter(is_blocking=True).select_related("machine", "work_unit")
 

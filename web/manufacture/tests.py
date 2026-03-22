@@ -7,6 +7,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from core.models import UserProfile
 from crm.models import Client, Contact, Order, OrderItem, Product
 from manufacture.models import (
     Machine,
@@ -388,3 +389,81 @@ class ProductionWorkspaceViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.execution_stage.order_item.product.name)
         self.assertGreater(len(response.context["rows"]), 0)
+
+    def test_orders_in_work_report_lists_order_with_progress(self):
+        self.execution_stage.status = ProductionStage.Status.IN_PROGRESS
+        self.execution_stage.started_at = timezone.now() - timedelta(hours=1)
+        self.execution_stage.save(update_fields=["status", "started_at", "updated_at"])
+
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("production_orders_in_work_report"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.order.title)
+        self.assertContains(response, self.execution_stage.get_stage_type_display())
+        self.assertGreater(len(response.context["rows"]), 0)
+
+
+class ProductionRowLevelVisibilityTests(TestCase):
+    def create_user_with_role(self, email, role):
+        user = get_user_model().objects.create_user(
+            username=email,
+            email=email,
+            password="secret123",
+            is_active=True,
+        )
+        user.profile.role = role
+        user.profile.save()
+        return user
+
+    def setUp(self):
+        self.manager = self.create_user_with_role("prod-row-manager@example.com", UserProfile.Role.SALES_MANAGER)
+        self.other_manager = self.create_user_with_role("prod-row-other@example.com", UserProfile.Role.SALES_MANAGER)
+        self.production_user = self.create_user_with_role("prod-row-production@example.com", UserProfile.Role.PRODUCTION)
+
+        client = Client.objects.create(name="Production Shared Client", email="prod-shared@example.com")
+        contact = Contact.objects.create(client=client, full_name="Production Shared Contact")
+        self.my_product = Product.objects.create(name="Visibility Product A", sku="VIS-001")
+        self.other_product = Product.objects.create(name="Visibility Product B", sku="VIS-002")
+        self.storage = WorkUnit.objects.create(name="Visibility Storage", type=WorkUnit.UnitType.STORAGE)
+        self.assembly = WorkUnit.objects.create(name="Visibility Assembly", type=WorkUnit.UnitType.ASSEMBLY)
+        self.laser = Machine.objects.create(name="Visibility Laser", type=Machine.MachineType.LASER)
+        self.paint = Machine.objects.create(name="Visibility Paint", type=Machine.MachineType.PAINTING)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.my_order = Order.objects.create(contact=contact, manager=self.manager)
+            OrderItem.objects.create(order=self.my_order, product=self.my_product, quantity=1, unit_price=Decimal("100.00"))
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.other_order = Order.objects.create(contact=contact, manager=self.other_manager)
+            OrderItem.objects.create(order=self.other_order, product=self.other_product, quantity=1, unit_price=Decimal("120.00"))
+
+        self.my_slot = self.my_order.slots.order_by("id").first()
+        self.other_slot = self.other_order.slots.order_by("id").first()
+
+    def test_sales_manager_report_only_shows_own_orders(self):
+        self.client.force_login(self.manager)
+        response = self.client.get(reverse("production_orders_in_work_report"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.my_order.title)
+        self.assertNotContains(response, self.other_order.title)
+        self.assertEqual(len(response.context["rows"]), 1)
+
+    def test_slot_events_api_filters_out_other_managers_slots(self):
+        self.client.force_login(self.manager)
+        response = self.client.get(reverse("production_slot_events"))
+
+        self.assertEqual(response.status_code, 200)
+        slot_ids = {event["id"] for event in response.json() if event["kind"] == "slot"}
+        self.assertIn(str(self.my_slot.id), slot_ids)
+        self.assertNotIn(str(self.other_slot.id), slot_ids)
+
+    def test_production_role_sees_full_production_contour(self):
+        self.client.force_login(self.production_user)
+        response = self.client.get(reverse("production_orders_in_work_report"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.my_order.title)
+        self.assertContains(response, self.other_order.title)
+        self.assertEqual(len(response.context["rows"]), 2)

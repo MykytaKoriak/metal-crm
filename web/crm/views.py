@@ -17,6 +17,14 @@ from django.views.decorators.http import require_POST
 
 from core.access import INTERNAL_ROLES, roles_required
 from core.models import UserProfile
+from core.visibility import (
+    filter_clients_queryset,
+    filter_contacts_queryset,
+    filter_orders_queryset,
+    filter_slots_queryset,
+    filter_tasks_queryset,
+    visible_manager_choices_queryset,
+)
 
 from .forms import ClientForm, ContactForm, OrderForm, OrderItemFormSet, ProductForm, TaskForm
 from .models import Client, Contact, Order, Product, Task
@@ -297,11 +305,19 @@ def _task_stats(queryset, today):
 
 def _task_filter_context(*, request, current_url, filter_values):
     selected_client_id = filter_values["client_id"]
-    order_options = Order.objects.select_related("contact", "contact__client").order_by("-created_at", "-id")
+    order_options = filter_orders_queryset(
+        request.user,
+        Order.objects.select_related("contact", "contact__client").order_by("-created_at", "-id"),
+    )
     if selected_client_id.isdigit():
         order_options = order_options.filter(contact__client_id=int(selected_client_id))
     else:
         order_options = order_options[:100]
+
+    manager_options = visible_manager_choices_queryset(
+        request.user,
+        get_user_model().objects.filter(is_active=True).order_by("email", "username"),
+    )
 
     return {
         "selected_assigned_to": filter_values["assigned_to"],
@@ -309,8 +325,8 @@ def _task_filter_context(*, request, current_url, filter_values):
         "selected_order_id": filter_values["order_id"],
         "selected_status": filter_values["status"],
         "selected_deadline": filter_values["deadline"],
-        "assigned_to_options": get_user_model().objects.filter(is_active=True).order_by("email", "username"),
-        "client_options": Client.objects.order_by("name"),
+        "assigned_to_options": manager_options,
+        "client_options": filter_clients_queryset(request.user, Client.objects.order_by("name")),
         "order_options": order_options,
         "task_status_choices": Task.Status.choices,
         "deadline_options": TASK_DEADLINE_OPTIONS,
@@ -427,7 +443,8 @@ def _render_delete_page(
 def clients_list(request):
     today = timezone.localdate()
     search = _search_param(request)
-    queryset = (
+    queryset = filter_clients_queryset(
+        request.user,
         Client.objects.prefetch_related("tags")
         .annotate(
             contacts_count=Count("contacts", distinct=True),
@@ -438,7 +455,7 @@ def clients_list(request):
                 distinct=True,
             ),
         )
-        .order_by("-created_at", "name")
+        .order_by("-created_at", "name"),
     )
     if search:
         queryset = queryset.filter(
@@ -458,10 +475,10 @@ def clients_list(request):
         client.delete_url = _build_url("crm_client_delete", args=[client.id], next_url=current_url) if can_delete_client else None
 
     stats = {
-        "total_clients": Client.objects.count(),
-        "new_clients": Client.objects.filter(created_at__date__gte=today - timedelta(days=30)).count(),
-        "b2b_clients": Client.objects.filter(client_type__in=[Client.ClientType.FOP, Client.ClientType.TOV]).count(),
-        "clients_with_open_tasks": Client.objects.filter(tasks__status__in=Task.OPEN_STATUSES).distinct().count(),
+        "total_clients": queryset.count(),
+        "new_clients": queryset.filter(created_at__date__gte=today - timedelta(days=30)).count(),
+        "b2b_clients": queryset.filter(client_type__in=[Client.ClientType.FOP, Client.ClientType.TOV]).count(),
+        "clients_with_open_tasks": queryset.filter(tasks__status__in=Task.OPEN_STATUSES).distinct().count(),
     }
 
     context = _crm_context(request, "clients")
@@ -483,18 +500,27 @@ def client_details(request, client_id):
     today = timezone.localdate()
     current_url = request.get_full_path()
     client = get_object_or_404(
-        Client.objects.prefetch_related("tags", "contacts__tags"),
+        filter_clients_queryset(
+            request.user,
+            Client.objects.prefetch_related("tags", "contacts__tags"),
+        ),
         pk=client_id,
     )
 
-    contacts = list(client.contacts.all().order_by("full_name", "id"))
+    contacts = list(filter_contacts_queryset(request.user, client.contacts.all().order_by("full_name", "id")))
     orders = list(
-        _annotated_orders_queryset()
+        filter_orders_queryset(
+            request.user,
+            _annotated_orders_queryset(),
+        )
         .filter(contact__client=client)
         .order_by("-created_at", "-id")
     )
     tasks = list(
-        Task.objects.filter(client=client)
+        filter_tasks_queryset(
+            request.user,
+            Task.objects.filter(client=client),
+        )
         .select_related("client", "contact", "order", "assigned_to", "assigned_by")
         .order_by("date", "id")
     )
@@ -573,14 +599,15 @@ def client_details(request, client_id):
 @roles_required(*INTERNAL_ROLES)
 def contacts_list(request):
     search = _search_param(request)
-    queryset = (
+    queryset = filter_contacts_queryset(
+        request.user,
         Contact.objects.select_related("client")
         .prefetch_related("tags")
         .annotate(
             orders_count=Count("orders", distinct=True),
             open_tasks_count=Count("tasks", filter=Q(tasks__status__in=Task.OPEN_STATUSES), distinct=True),
         )
-        .order_by("-created_at", "full_name")
+        .order_by("-created_at", "full_name"),
     )
     if search:
         queryset = queryset.filter(
@@ -601,10 +628,10 @@ def contacts_list(request):
         contact.delete_url = _build_url("crm_contact_delete", args=[contact.id], next_url=current_url) if can_delete_contact else None
 
     stats = {
-        "total_contacts": Contact.objects.count(),
-        "with_email": Contact.objects.exclude(email="").count(),
-        "with_phone": Contact.objects.exclude(phone="").count(),
-        "with_open_tasks": Contact.objects.filter(tasks__status__in=Task.OPEN_STATUSES).distinct().count(),
+        "total_contacts": queryset.count(),
+        "with_email": queryset.exclude(email="").count(),
+        "with_phone": queryset.exclude(phone="").count(),
+        "with_open_tasks": queryset.filter(tasks__status__in=Task.OPEN_STATUSES).distinct().count(),
     }
 
     context = _crm_context(request, "contacts")
@@ -629,7 +656,7 @@ def orders_list(request):
     selected_status = request.GET.get("status", "").strip()
     selected_delivery_method = request.GET.get("delivery_method", "").strip()
     selected_payment_type = request.GET.get("payment_type", "").strip()
-    queryset = _annotated_orders_queryset().order_by("-created_at", "-id")
+    queryset = filter_orders_queryset(request.user, _annotated_orders_queryset().order_by("-created_at", "-id"))
     if search:
         queryset = queryset.filter(
             Q(title__icontains=search)
@@ -688,7 +715,10 @@ def orders_list(request):
             "selected_status": selected_status,
             "selected_delivery_method": selected_delivery_method,
             "selected_payment_type": selected_payment_type,
-            "manager_options": get_user_model().objects.filter(is_active=True).order_by("email", "username"),
+            "manager_options": visible_manager_choices_queryset(
+                request.user,
+                get_user_model().objects.filter(is_active=True).order_by("email", "username"),
+            ),
             "status_choices": Order.Status.choices,
             "delivery_choices": Order.DeliveryMethod.choices,
             "payment_choices": Order.PaymentType.choices,
@@ -709,7 +739,7 @@ def tasks_list(request):
     today = timezone.localdate()
     filter_values = _task_filter_values(request)
     queryset = _apply_task_filters(
-        _tasks_base_queryset(),
+        filter_tasks_queryset(request.user, _tasks_base_queryset()),
         request=request,
         filter_values=filter_values,
         today=today,
@@ -752,7 +782,7 @@ def tasks_kanban(request):
     today = timezone.localdate()
     filter_values = _task_filter_values(request)
     queryset = _apply_task_filters(
-        _tasks_base_queryset(),
+        filter_tasks_queryset(request.user, _tasks_base_queryset()),
         request=request,
         filter_values=filter_values,
         today=today,
@@ -799,13 +829,17 @@ def tasks_kanban(request):
 @require_POST
 def task_status_update(request, task_id):
     _require_permission(request, "crm.change_task")
-    task = get_object_or_404(Task.objects.select_related("client"), pk=task_id)
+    task = get_object_or_404(
+        filter_tasks_queryset(request.user, Task.objects.select_related("client")),
+        pk=task_id,
+    )
     allowed_statuses = {code for code, _ in Task.Status.choices}
     new_status = request.POST.get("status", "").strip()
     if new_status not in allowed_statuses:
         return HttpResponseBadRequest("Invalid task status.")
 
     task.status = new_status
+    task._changed_by = request.user
     task.save(update_fields=["status"])
 
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
@@ -892,7 +926,10 @@ def client_create(request):
 @roles_required(*INTERNAL_ROLES)
 def client_update(request, client_id):
     _require_permission(request, "crm.change_client")
-    client = get_object_or_404(Client.objects.prefetch_related("tags"), pk=client_id)
+    client = get_object_or_404(
+        filter_clients_queryset(request.user, Client.objects.prefetch_related("tags")),
+        pk=client_id,
+    )
     fallback_url = reverse("client_details", args=[client.id])
     form = ClientForm(request.POST or None, instance=client)
     if request.method == "POST" and form.is_valid():
@@ -920,7 +957,10 @@ def client_update(request, client_id):
 @roles_required(*INTERNAL_ROLES)
 def client_delete(request, client_id):
     _require_permission(request, "crm.delete_client")
-    client = get_object_or_404(Client.objects.prefetch_related("contacts"), pk=client_id)
+    client = get_object_or_404(
+        filter_clients_queryset(request.user, Client.objects.prefetch_related("contacts")),
+        pk=client_id,
+    )
     fallback_url = reverse("crm_clients")
     cancel_url = _safe_next_url(request) or reverse("client_details", args=[client.id])
     delete_error = None
@@ -947,15 +987,21 @@ def client_delete(request, client_id):
 @roles_required(*INTERNAL_ROLES)
 def contact_create(request):
     _require_permission(request, "crm.add_contact")
-    selected_client = _object_from_param(Client.objects.all(), request.GET.get("client"))
+    selected_client = _object_from_param(
+        filter_clients_queryset(request.user, Client.objects.all()),
+        request.GET.get("client"),
+    )
     initial = {}
     if selected_client:
         initial["client"] = selected_client.id
     if request.method == "POST":
-        form = ContactForm(request.POST)
-        sidebar_client = _object_from_param(Client.objects.all(), request.POST.get("client")) or selected_client
+        form = ContactForm(request.POST, user=request.user)
+        sidebar_client = _object_from_param(
+            filter_clients_queryset(request.user, Client.objects.all()),
+            request.POST.get("client"),
+        ) or selected_client
     else:
-        form = ContactForm(initial=initial)
+        form = ContactForm(initial=initial, user=request.user)
         sidebar_client = selected_client
 
     if request.method == "POST" and form.is_valid():
@@ -982,9 +1028,12 @@ def contact_create(request):
 @roles_required(*INTERNAL_ROLES)
 def contact_update(request, contact_id):
     _require_permission(request, "crm.change_contact")
-    contact = get_object_or_404(Contact.objects.select_related("client").prefetch_related("tags"), pk=contact_id)
+    contact = get_object_or_404(
+        filter_contacts_queryset(request.user, Contact.objects.select_related("client").prefetch_related("tags")),
+        pk=contact_id,
+    )
     fallback_url = reverse("client_details", args=[contact.client_id])
-    form = ContactForm(request.POST or None, instance=contact)
+    form = ContactForm(request.POST or None, instance=contact, user=request.user)
     if request.method == "POST" and form.is_valid():
         contact = form.save()
         return _redirect_target(request, reverse("client_details", args=[contact.client_id]))
@@ -1010,7 +1059,10 @@ def contact_update(request, contact_id):
 @roles_required(*INTERNAL_ROLES)
 def contact_delete(request, contact_id):
     _require_permission(request, "crm.delete_contact")
-    contact = get_object_or_404(Contact.objects.select_related("client"), pk=contact_id)
+    contact = get_object_or_404(
+        filter_contacts_queryset(request.user, Contact.objects.select_related("client")),
+        pk=contact_id,
+    )
     fallback_url = reverse("client_details", args=[contact.client_id])
     delete_error = None
     if request.method == "POST":
@@ -1038,7 +1090,7 @@ def order_create(request):
     _require_permission(request, "crm.add_order")
     user_model = get_user_model()
     selected_contact = _object_from_param(
-        Contact.objects.select_related("client"),
+        filter_contacts_queryset(request.user, Contact.objects.select_related("client")),
         request.GET.get("contact"),
     )
     selected_manager = _object_from_param(user_model.objects.all(), request.GET.get("manager"))
@@ -1048,18 +1100,23 @@ def order_create(request):
 
     if request.method == "POST":
         order = Order()
-        form = OrderForm(request.POST, instance=order)
+        form = OrderForm(request.POST, instance=order, user=request.user)
         formset = OrderItemFormSet(request.POST, instance=order)
-        sidebar_contact = _object_from_param(Contact.objects.select_related("client"), request.POST.get("contact")) or selected_contact
+        sidebar_contact = _object_from_param(
+            filter_contacts_queryset(request.user, Contact.objects.select_related("client")),
+            request.POST.get("contact"),
+        ) or selected_contact
     else:
         order = Order()
-        form = OrderForm(initial=initial, instance=order)
+        form = OrderForm(initial=initial, instance=order, user=request.user)
         formset = OrderItemFormSet(instance=order)
         sidebar_contact = selected_contact
 
     if request.method == "POST" and form.is_valid() and formset.is_valid():
         with transaction.atomic():
-            order = form.save()
+            order = form.save(commit=False)
+            order._changed_by = request.user
+            order.save()
             formset.instance = order
             formset.save()
             order.refresh_title()
@@ -1091,18 +1148,26 @@ def order_create(request):
 @roles_required(*INTERNAL_ROLES)
 def order_update(request, order_id):
     _require_permission(request, "crm.change_order")
-    order = get_object_or_404(Order.objects.select_related("contact", "contact__client", "manager"), pk=order_id)
+    order = get_object_or_404(
+        filter_orders_queryset(
+            request.user,
+            Order.objects.select_related("contact", "contact__client", "manager"),
+        ),
+        pk=order_id,
+    )
     fallback_url = reverse("client_details", args=[order.contact.client_id])
     if request.method == "POST":
-        form = OrderForm(request.POST, instance=order)
+        form = OrderForm(request.POST, instance=order, user=request.user)
         formset = OrderItemFormSet(request.POST, instance=order)
     else:
-        form = OrderForm(instance=order)
+        form = OrderForm(instance=order, user=request.user)
         formset = OrderItemFormSet(instance=order)
 
     if request.method == "POST" and form.is_valid() and formset.is_valid():
         with transaction.atomic():
-            order = form.save()
+            order = form.save(commit=False)
+            order._changed_by = request.user
+            order.save()
             formset.save()
             order.refresh_title()
         return _redirect_target(request, reverse("client_details", args=[order.contact.client_id]))
@@ -1131,7 +1196,10 @@ def order_update(request, order_id):
 @roles_required(*INTERNAL_ROLES)
 def order_delete(request, order_id):
     _require_permission(request, "crm.delete_order")
-    order = get_object_or_404(Order.objects.select_related("contact", "contact__client"), pk=order_id)
+    order = get_object_or_404(
+        filter_orders_queryset(request.user, Order.objects.select_related("contact", "contact__client")),
+        pk=order_id,
+    )
     fallback_url = reverse("client_details", args=[order.contact.client_id])
     delete_error = None
     if request.method == "POST":
@@ -1158,13 +1226,16 @@ def order_delete(request, order_id):
 def task_create(request):
     _require_permission(request, "crm.add_task")
     user_model = get_user_model()
-    selected_client = _object_from_param(Client.objects.all(), request.GET.get("client"))
+    selected_client = _object_from_param(
+        filter_clients_queryset(request.user, Client.objects.all()),
+        request.GET.get("client"),
+    )
     selected_contact = _object_from_param(
-        Contact.objects.select_related("client"),
+        filter_contacts_queryset(request.user, Contact.objects.select_related("client")),
         request.GET.get("contact"),
     )
     selected_order = _object_from_param(
-        Order.objects.select_related("contact", "contact__client"),
+        filter_orders_queryset(request.user, Order.objects.select_related("contact", "contact__client")),
         request.GET.get("order"),
     )
     selected_assigned_by = _object_from_param(user_model.objects.all(), request.GET.get("assigned_by")) or request.user
@@ -1185,11 +1256,17 @@ def task_create(request):
     }
 
     if request.method == "POST":
-        form = TaskForm(request.POST)
-        posted_client = _object_from_param(Client.objects.all(), request.POST.get("client"))
-        posted_contact = _object_from_param(Contact.objects.select_related("client"), request.POST.get("contact"))
+        form = TaskForm(request.POST, user=request.user)
+        posted_client = _object_from_param(
+            filter_clients_queryset(request.user, Client.objects.all()),
+            request.POST.get("client"),
+        )
+        posted_contact = _object_from_param(
+            filter_contacts_queryset(request.user, Contact.objects.select_related("client")),
+            request.POST.get("contact"),
+        )
         posted_order = _object_from_param(
-            Order.objects.select_related("contact", "contact__client"),
+            filter_orders_queryset(request.user, Order.objects.select_related("contact", "contact__client")),
             request.POST.get("order"),
         )
         sidebar_client = (
@@ -1199,11 +1276,13 @@ def task_create(request):
             or resolved_client
         )
     else:
-        form = TaskForm(initial=initial)
+        form = TaskForm(initial=initial, user=request.user)
         sidebar_client = resolved_client
 
     if request.method == "POST" and form.is_valid():
-        task = form.save()
+        task = form.save(commit=False)
+        task._changed_by = request.user
+        task.save()
         return _redirect_target(request, reverse("client_details", args=[task.client_id]))
 
     cancel_url = _safe_next_url(request)
@@ -1229,11 +1308,19 @@ def task_create(request):
 @roles_required(*INTERNAL_ROLES)
 def task_update(request, task_id):
     _require_permission(request, "crm.change_task")
-    task = get_object_or_404(Task.objects.select_related("client", "contact", "order", "assigned_by", "assigned_to"), pk=task_id)
+    task = get_object_or_404(
+        filter_tasks_queryset(
+            request.user,
+            Task.objects.select_related("client", "contact", "order", "assigned_by", "assigned_to"),
+        ),
+        pk=task_id,
+    )
     fallback_url = reverse("client_details", args=[task.client_id])
-    form = TaskForm(request.POST or None, instance=task)
+    form = TaskForm(request.POST or None, instance=task, user=request.user)
     if request.method == "POST" and form.is_valid():
-        task = form.save()
+        task = form.save(commit=False)
+        task._changed_by = request.user
+        task.save()
         return _redirect_target(request, reverse("client_details", args=[task.client_id]))
     return _render_form_page(
         request,
@@ -1257,7 +1344,10 @@ def task_update(request, task_id):
 @roles_required(*INTERNAL_ROLES)
 def task_delete(request, task_id):
     _require_permission(request, "crm.delete_task")
-    task = get_object_or_404(Task.objects.select_related("client", "contact", "order"), pk=task_id)
+    task = get_object_or_404(
+        filter_tasks_queryset(request.user, Task.objects.select_related("client", "contact", "order")),
+        pk=task_id,
+    )
     fallback_url = reverse("client_details", args=[task.client_id])
     delete_error = None
     if request.method == "POST":

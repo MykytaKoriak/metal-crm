@@ -2,41 +2,260 @@
 
 {% block title %}Керівник{% endblock %}
 {% block eyebrow %}Executive dashboard{% endblock %}
-{% block hero_title %}Аналітика для керівника{% endblock %}
-{% block hero_text %}Ключові показники по клієнтах, замовленнях і виручці.{% endblock %}
+{% block hero_title %}Управлінська аналітика{% endblock %}
+{% block hero_text %}Проблемні зони по замовленнях, виробництву, задачах та статусній воронці в одному огляді.{% endblock %}
 
 {% block hero_stats %}
     <div class="chip">
-        <strong>{{ new_clients_count }}</strong>
-        <span>Нові клієнти / 30 днів</span>
+        <strong>{{ executive_summary.at_risk_order_count }}</strong>
+        <span>Замовлень з ризиком</span>
     </div>
     <div class="chip">
-        <strong>{{ new_orders_count }}</strong>
-        <span>Нові замовлення / 30 днів</span>
+        <strong>{{ executive_summary.overdue_stage_count }}</strong>
+        <span>Прострочені етапи</span>
     </div>
     <div class="chip">
-        <strong>{{ monthly_revenue|length }}</strong>
-        <span>Місяців у зрізі</span>
+        <strong>{{ executive_summary.critical_resource_count }}</strong>
+        <span>Перегружені ресурси</span>
     </div>
     <div class="chip">
-        <strong>{{ production.summary.week_load }}%</strong>
-        <span>Виробництво на 7 днів</span>
+        <strong>{{ executive_summary.stalled_task_count }}</strong>
+        <span>Завислі задачі</span>
+    </div>
+    <div class="chip">
+        <strong>{{ executive_summary.in_production_share }}%</strong>
+        <span>Частка в виробництві</span>
     </div>
 {% endblock %}
 
 {% block content %}
-    <section class="panel">
-        <span class="eyebrow">Revenue</span>
-        <h2>Загальна виручка по місяцях</h2>
-        {% for row in monthly_revenue %}
-            <div class="bar-row">
-                <strong>{{ row.label }}</strong>
-                <div class="bar-track">
-                    <div class="bar-fill" style="width: {{ row.bar_percent }}%"></div>
-                </div>
-                <span>{{ row.revenue|floatformat:2 }}</span>
+    <section class="section-grid three-up">
+        <article class="panel">
+            <span class="eyebrow">Orders</span>
+            <h2>Замовлення</h2>
+            <div class="metrics">
+                <div class="metric"><strong>{{ executive_summary.open_orders_count }}</strong><span>Незавершені</span></div>
+                <div class="metric"><strong>{{ executive_summary.in_production_count }}</strong><span>В виробництві</span></div>
+                <div class="metric"><strong>{{ new_orders_count }}</strong><span>Нові / 30 днів</span></div>
             </div>
-        {% endfor %}
+            <div class="link-row">
+                <a href="{% url 'production_orders_in_work_report' %}">Відкрити звіт по замовленнях</a>
+            </div>
+        </article>
+        <article class="panel">
+            <span class="eyebrow">Clients</span>
+            <h2>Клієнтський потік</h2>
+            <div class="metrics">
+                <div class="metric"><strong>{{ new_clients_count }}</strong><span>Нові клієнти / 30 днів</span></div>
+                <div class="metric"><strong>{{ monthly_revenue|length }}</strong><span>Місяців у зрізі</span></div>
+                <div class="metric"><strong>{{ production.summary.week_load }}%</strong><span>Завантаження 7 днів</span></div>
+            </div>
+        </article>
+        <article class="panel">
+            <span class="eyebrow">Problems</span>
+            <h2>Проблемні зони</h2>
+            <div class="metrics">
+                <div class="metric"><strong>{{ executive_summary.at_risk_order_count }}</strong><span>Ризикові замовлення</span></div>
+                <div class="metric"><strong>{{ executive_summary.overdue_stage_count }}</strong><span>Просрочені етапи</span></div>
+                <div class="metric"><strong>{{ executive_summary.stalled_task_count }}</strong><span>Завислі задачі</span></div>
+            </div>
+        </article>
+    </section>
+
+    <section class="section-grid two-up">
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <span class="eyebrow">At risk</span>
+                    <h2>Замовлення з ризиком зриву</h2>
+                </div>
+                <a class="button-link" href="{% url 'production_orders_in_work_report' %}?risk_only=1">Повний список</a>
+            </div>
+            {% if at_risk_orders %}
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                        <tr>
+                            <th>Замовлення</th>
+                            <th>Поточний етап</th>
+                            <th>Готовність</th>
+                            <th>Дедлайн</th>
+                            <th>Ризик</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in at_risk_orders %}
+                            <tr>
+                                <td>
+                                    <strong>{{ row.order.title|default:"Без назви" }}</strong>
+                                    <div class="muted">{{ row.order.contact.full_name }}{% if row.order.contact.client %} / {{ row.order.contact.client.name }}{% endif %}</div>
+                                </td>
+                                <td>
+                                    <strong>{{ row.current_stage_label }}</strong>
+                                    <div class="muted">{{ row.current_resource_label|default:"Ресурс не призначено" }}</div>
+                                </td>
+                                <td>{{ row.progress_percent }}%</td>
+                                <td>{% if row.deadline %}{{ row.deadline|date:"d.m.Y" }}{% else %}—{% endif %}</td>
+                                <td>
+                                    <span class="pill {{ row.risk_level }}">{{ row.risk_label }}</span>
+                                    <div class="muted">{{ row.risk_reasons|join:", " }}</div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty">Замовлень з вираженим ризиком зараз немає.</p>
+            {% endif %}
+        </article>
+
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <span class="eyebrow">Overdue stages</span>
+                    <h2>Просрочені етапи</h2>
+                </div>
+                <a class="button-link" href="{% url 'production_overdue_stage_report' %}">Повний звіт</a>
+            </div>
+            {% if overdue_stage_rows %}
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                        <tr>
+                            <th>Етап</th>
+                            <th>Ресурс</th>
+                            <th>Планове завершення</th>
+                            <th>Просрочка</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in overdue_stage_rows %}
+                            <tr>
+                                <td>
+                                    <strong>{{ row.stage.order_item.product.name }}</strong>
+                                    <div class="muted">{{ row.stage.get_stage_type_display }}</div>
+                                </td>
+                                <td>{{ row.resource_label|default:"Не призначено" }}</td>
+                                <td>{% if row.planned_end %}{{ row.planned_end|date:"d.m.Y H:i" }}{% else %}—{% endif %}</td>
+                                <td>{{ row.overdue_hours }} год</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty">Просрочених етапів немає.</p>
+            {% endif %}
+        </article>
+    </section>
+
+    <section class="section-grid two-up">
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <span class="eyebrow">Resources</span>
+                    <h2>Перегружені ресурси</h2>
+                </div>
+                <a class="button-link" href="{% url 'machine_load_report' %}">Перейти до перегрузу</a>
+            </div>
+            {% if critical_resources %}
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                        <tr>
+                            <th>Ресурс</th>
+                            <th>Тип</th>
+                            <th>Сьогодні</th>
+                            <th>7 днів</th>
+                            <th>Статус</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in critical_resources %}
+                            <tr>
+                                <td><a href="{% url row.detail_url_name row.id %}">{{ row.name }}</a></td>
+                                <td>{{ row.type_label }}</td>
+                                <td>{{ row.today_load }}%</td>
+                                <td>{{ row.week_load }}%</td>
+                                <td><span class="pill {{ row.status }}">{{ row.status }}</span></td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty">Критично перегружених ресурсів немає.</p>
+            {% endif %}
+        </article>
+
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <span class="eyebrow">Tasks</span>
+                    <h2>Завислі задачі</h2>
+                </div>
+            </div>
+            {% if stalled_tasks %}
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                        <tr>
+                            <th>Задача</th>
+                            <th>Статус</th>
+                            <th>Дата</th>
+                            <th>Відповідальний</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for task in stalled_tasks %}
+                            <tr>
+                                <td>
+                                    <strong>{{ task.title }}</strong>
+                                    {% if task.client %}<div class="muted">{{ task.client.name }}</div>{% endif %}
+                                </td>
+                                <td>{{ task.get_status_display }}</td>
+                                <td>{{ task.date|date:"d.m.Y" }}</td>
+                                <td>{% if task.assigned_to %}{{ task.assigned_to.email|default:task.assigned_to.username }}{% else %}—{% endif %}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty">Завислих задач немає.</p>
+            {% endif %}
+        </article>
+    </section>
+
+    <section class="section-grid two-up">
+        <article class="panel">
+            <span class="eyebrow">Conversion</span>
+            <h2>Конверсія по статусах замовлень</h2>
+            {% for row in order_status_rows %}
+                <div class="bar-row">
+                    <strong>{{ row.label }}</strong>
+                    <div class="bar-track">
+                        <div class="bar-fill" style="width: {{ row.bar_percent }}%"></div>
+                    </div>
+                    <span>{{ row.count }}</span>
+                </div>
+            {% endfor %}
+        </article>
+
+        <article class="panel">
+            <span class="eyebrow">Revenue</span>
+            <h2>Виручка по місяцях</h2>
+            {% for row in monthly_revenue %}
+                <div class="bar-row">
+                    <strong>{{ row.label }}</strong>
+                    <div class="bar-track">
+                        <div class="bar-fill" style="width: {{ row.bar_percent }}%"></div>
+                    </div>
+                    <span>{{ row.revenue|floatformat:2 }}</span>
+                </div>
+            {% endfor %}
+        </article>
     </section>
 
     <section class="section-grid two-up">
@@ -50,9 +269,7 @@
                             <h3>{{ client.name }}</h3>
                             <p class="muted">{{ client.created_at|date:"d.m.Y H:i" }}</p>
                             <p>{{ client.get_client_type_display }}</p>
-                            {% if client.email %}
-                                <p>{{ client.email }}</p>
-                            {% endif %}
+                            {% if client.email %}<p>{{ client.email }}</p>{% endif %}
                         </article>
                     {% endfor %}
                 </div>
@@ -62,8 +279,8 @@
         </article>
 
         <article class="panel">
-            <span class="eyebrow">Orders</span>
-            <h2>Нові замовлення</h2>
+            <span class="eyebrow">Recent orders</span>
+            <h2>Останні замовлення</h2>
             {% if recent_orders %}
                 <div class="mini-list">
                     {% for order in recent_orders %}
@@ -79,36 +296,5 @@
                 <p class="empty">Нових замовлень поки немає.</p>
             {% endif %}
         </article>
-    </section>
-
-    <section class="panel">
-        <span class="eyebrow">Production</span>
-        <h2>Завантаженість виробництва</h2>
-        {% if production.top_resources %}
-            <div class="table-wrap">
-                <table class="table">
-                    <thead>
-                    <tr>
-                        <th>Ресурс</th>
-                        <th>Тип</th>
-                        <th>Тиждень</th>
-                        <th>Статус</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    {% for row in production.top_resources %}
-                        <tr>
-                            <td><a href="{% url row.detail_url_name row.id %}">{{ row.name }}</a></td>
-                            <td>{{ row.type_label }}</td>
-                            <td>{{ row.week_load }}%</td>
-                            <td><span class="pill {{ row.status }}">{{ row.status }}</span></td>
-                        </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        {% else %}
-            <p class="empty">Немає ресурсів для аналізу завантаження.</p>
-        {% endif %}
     </section>
 {% endblock %}
