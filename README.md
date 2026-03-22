@@ -819,3 +819,6 @@ Superuser создается командой `createsu` из `.env`. Role accou
 3. проверить Telegram
 4. проверить dashboards всех ролей
 5. прогнать тесты перед доработками
+
+for seed demo data 
+python manage.py seed_demo_data
