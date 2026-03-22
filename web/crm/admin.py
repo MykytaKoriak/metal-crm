@@ -3,7 +3,17 @@ from django.urls import reverse
 from django.utils.html import format_html
 
 from core.visibility import filter_clients_queryset, filter_contacts_queryset, filter_orders_queryset, filter_slots_queryset, filter_tasks_queryset
-from .models import Contact, Tag, Order, Task, Product, OrderItem, Client
+from .models import (
+    Client,
+    ClientInteraction,
+    Contact,
+    Order,
+    OrderItem,
+    Product,
+    ProductProductionNorm,
+    Tag,
+    Task,
+)
 from manufacture.models import ProductionSlot
 
 
@@ -26,7 +36,7 @@ class OrderInline(admin.TabularInline):
 class TaskInline(admin.TabularInline):
     model = Task
     extra = 0
-    fields = ["title", "assigned_to", "assigned_by", "date", "status", "comment"]
+    fields = ["title", "priority", "assigned_to", "assigned_by", "date", "status", "comment"]
     readonly_fields = ["assigned_by", "created_at"]
 
     def get_queryset(self, request):
@@ -44,6 +54,17 @@ class ContactInline(admin.TabularInline):
         return filter_contacts_queryset(request.user, super().get_queryset(request))
 
 
+class ClientInteractionInline(admin.TabularInline):
+    model = ClientInteraction
+    extra = 0
+    fields = ("event_at", "event_type", "source", "title", "contact", "order", "task", "created_by")
+    readonly_fields = ("event_at", "created_by")
+    show_change_link = True
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("contact", "order", "task", "created_by")
+
+
 @admin.register(Client)
 class ClientAdmin(admin.ModelAdmin):
     list_display = ("name", "workspace_link", "client_type", "tax_code", "phones", "email", "source", "created_at")
@@ -52,7 +73,7 @@ class ClientAdmin(admin.ModelAdmin):
     filter_horizontal = ("tags",)
     readonly_fields = ("created_at", "updated_at")
 
-    inlines = [ContactInline]
+    inlines = [ContactInline, ClientInteractionInline]
 
     fieldsets = (
         ("Основна інформація", {
@@ -100,11 +121,27 @@ class ProductionSlotInline(admin.TabularInline):
         return filter_slots_queryset(request.user, super().get_queryset(request))
 
 
+class ProductProductionNormInline(admin.TabularInline):
+    model = ProductProductionNorm
+    extra = 0
+    fields = (
+        "stage_type",
+        "time_value",
+        "time_unit",
+        "material_value",
+        "material_unit",
+        "version",
+        "is_active",
+        "comment",
+    )
+
+
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     list_display = ["name", "sku", "base_price", "is_active"]
     list_filter = ["is_active"]
     search_fields = ["name", "sku", "description", "technical_description"]
+    inlines = [ProductProductionNormInline]
 
     fieldsets = (
         ("Основна інформація", {
@@ -253,6 +290,7 @@ class TaskAdmin(admin.ModelAdmin):
         "client_link",
         "contact_link",
         "order_link",
+        "priority",
         "assigned_to",
         "assigned_by",
         "date",
@@ -263,12 +301,15 @@ class TaskAdmin(admin.ModelAdmin):
 
     list_filter = [
         "status",
+        "priority",
         "client",
+        "assigned_by",
         "assigned_to",
     ]
 
     search_fields = [
         "title",
+        "description",
         "comment",
         "client__name",
         "contact__full_name",
@@ -310,3 +351,40 @@ class TaskAdmin(admin.ModelAdmin):
             return "—"
         url = reverse("admin:crm_order_change", args=[obj.order_id])
         return format_html('<a href="{}">{}</a>', url, obj.order.title or f"Order #{obj.order_id}")
+
+
+@admin.register(ClientInteraction)
+class ClientInteractionAdmin(admin.ModelAdmin):
+    list_display = ("event_at", "client", "event_type", "source", "title", "created_by")
+    list_filter = ("event_type", "source", "event_at")
+    search_fields = ("title", "description", "client__name", "contact__full_name", "order__title", "task__title")
+    autocomplete_fields = ("client", "contact", "order", "task", "created_by")
+    readonly_fields = ("created_at",)
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .select_related("client", "contact", "order", "task", "created_by")
+            .filter(client__in=filter_clients_queryset(request.user, Client.objects.all()))
+        )
+
+
+@admin.register(ProductProductionNorm)
+class ProductProductionNormAdmin(admin.ModelAdmin):
+    list_display = (
+        "product",
+        "stage_type",
+        "time_value",
+        "time_unit",
+        "material_value",
+        "material_unit",
+        "version",
+        "is_active",
+    )
+    list_filter = ("stage_type", "time_unit", "material_unit", "is_active")
+    search_fields = ("product__name", "product__sku", "version", "comment")
+    autocomplete_fields = ("product",)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("product")

@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.models import UserProfile
-from crm.models import Client, Contact, Order, OrderItem, Product
+from crm.models import Client, Contact, Order, OrderItem, Product, ProductProductionNorm
 from manufacture.models import (
     Machine,
     ProductionSlot,
@@ -17,6 +17,7 @@ from manufacture.models import (
     ResourceDowntime,
     WorkUnit,
 )
+from manufacture.services import estimate_stage_duration
 
 
 class ManufacturePlanningTests(TestCase):
@@ -93,6 +94,28 @@ class ManufacturePlanningTests(TestCase):
         self.assertTrue(all(slot.planning_source == ProductionSlot.PlanningSource.PLANNER for slot in slots))
         self.assertTrue(all(slot.operation_type == slot.stage.stage_type for slot in slots if slot.stage_id))
         self.assertTrue(all(slot.purpose for slot in slots))
+
+    def test_estimate_stage_duration_uses_product_norms_when_available(self):
+        ProductProductionNorm.objects.create(
+            product=self.product,
+            stage_type=ProductionStage.StageType.EXECUTION,
+            time_value=2.25,
+            time_unit=ProductProductionNorm.TimeUnit.HOURS,
+            material_value=1.5,
+            material_unit=ProductProductionNorm.MaterialUnit.SQUARE_METER,
+            version="v1",
+        )
+        order = self.create_order(quantity=3)
+        execution_stage = ProductionStage.objects.get(
+            order_item__order=order,
+            stage_type=ProductionStage.StageType.EXECUTION,
+        )
+        execution_slot = execution_stage.slots.get()
+
+        duration = estimate_stage_duration(execution_stage)
+
+        self.assertEqual(duration, timedelta(hours=6, minutes=45))
+        self.assertEqual(execution_slot.end_datetime - execution_slot.start_datetime, timedelta(hours=6, minutes=45))
 
     def test_planner_skips_blocked_resource_time(self):
         self.assembly.is_active = False

@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}Dashboard{% endblock %}</title>
+    <title>{% block title %}Панель{% endblock %}</title>
     <style>
         :root {
             --bg: #eef1f4;
@@ -520,15 +520,15 @@
 <div class="shell">
     <header class="topbar">
         <div class="brand">
-            <small>MK CRM</small>
+            <small>МК CRM</small>
             <strong>{{ profile.display_name }}</strong>
             <div class="topbar-role">{{ profile.get_role_display }}</div>
         </div>
         <nav class="nav">
-            <a href="{% url 'dashboard' %}" class="{% if active_section == 'dashboard' %}active{% endif %}">Dashboard</a>
+            <a href="{% url 'dashboard' %}" class="{% if active_section == 'dashboard' %}active{% endif %}">Головна</a>
             <a href="{% url 'my_account' %}" class="{% if active_section == 'account' %}active{% endif %}">Мій акаунт</a>
             {% if user.is_staff %}
-                <a href="/admin/">Admin</a>
+                <a href="/admin/">Адмінка</a>
             {% endif %}
             <form action="{% url 'logout' %}" method="post">
                 {% csrf_token %}
@@ -597,8 +597,8 @@
 
     <section class="hero">
         <div>
-            <span class="eyebrow">{% block eyebrow %}Role dashboard{% endblock %}</span>
-            <h1>{% block hero_title %}Dashboard{% endblock %}</h1>
+            <span class="eyebrow">{% block eyebrow %}Робоча панель{% endblock %}</span>
+            <h1>{% block hero_title %}Панель{% endblock %}</h1>
             <p>{% block hero_text %}{% endblock %}</p>
         </div>
         <div class="hero-stats">

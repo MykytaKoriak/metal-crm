@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    client_interaction_create,
     client_create,
     client_delete,
     client_details,
@@ -31,6 +32,7 @@ urlpatterns = [
     path("crm/clients/", clients_list, name="crm_clients"),
     path("crm/clients/new/", client_create, name="crm_client_create"),
     path("crm/clients/<int:client_id>/", client_details, name="client_details"),
+    path("crm/clients/<int:client_id>/interactions/new/", client_interaction_create, name="crm_client_interaction_create"),
     path("crm/clients/<int:client_id>/edit/", client_update, name="crm_client_update"),
     path("crm/clients/<int:client_id>/delete/", client_delete, name="crm_client_delete"),
     path("crm/contacts/", contacts_list, name="crm_contacts"),

@@ -604,6 +604,76 @@ class TestTelegramWebhook(DashboardTestMixin, TestCase):
         self.assertIn("Telegram task", send_args[1])
         self.assertIn("reply_markup", send_kwargs)
 
+    @patch("core.telegram.handlers.send_message")
+    def test_webhook_returns_help_for_linked_chat(self, send_message_mock):
+        self.profile.telegram_chat_id = "555001"
+        self.profile.save(update_fields=["telegram_chat_id"])
+
+        payload = {
+            "update_id": 1003,
+            "message": {
+                "message_id": 3,
+                "text": "/help",
+                "chat": {"id": 555001},
+                "from": {"id": 77, "username": "crm_user"},
+            },
+        }
+
+        response = self.client.post(
+            reverse("telegram_webhook"),
+            data=payload,
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        send_args, send_kwargs = send_message_mock.call_args
+        self.assertEqual(send_args[0], "555001")
+        self.assertIn("/me", send_args[1])
+        self.assertIn("/tasks", send_args[1])
+        self.assertIn("reply_markup", send_kwargs)
+
+    @patch("core.telegram.handlers.send_message")
+    def test_webhook_returns_profile_summary_for_linked_chat(self, send_message_mock):
+        today = timezone.localdate()
+        self.profile.telegram_chat_id = "555001"
+        self.profile.save(update_fields=["telegram_chat_id"])
+
+        client = Client.objects.create(name="Profile Client", email="profile-client@example.com")
+        contact = Contact.objects.create(client=client, full_name="Profile Contact")
+        Task.objects.create(
+            client=client,
+            contact=contact,
+            title="Profile task",
+            assigned_by=self.user,
+            assigned_to=self.user,
+            date=today,
+            status=Task.Status.NEW,
+        )
+
+        payload = {
+            "update_id": 1004,
+            "message": {
+                "message_id": 4,
+                "text": "/me",
+                "chat": {"id": 555001},
+                "from": {"id": 77, "username": "crm_user"},
+            },
+        }
+
+        response = self.client.post(
+            reverse("telegram_webhook"),
+            data=payload,
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        send_args, send_kwargs = send_message_mock.call_args
+        self.assertEqual(send_args[0], "555001")
+        self.assertIn("Профіль CRM", send_args[1])
+        self.assertIn("Telegram Manager", send_args[1])
+        self.assertIn("Відкриті задачі: 1", send_args[1])
+        self.assertIn("reply_markup", send_kwargs)
+
 
 class TestTelegramNotifications(DashboardTestMixin, TestCase):
     def setUp(self):
@@ -634,6 +704,20 @@ class TestTelegramNotifications(DashboardTestMixin, TestCase):
         self.assertEqual(notification.profile, self.manager.profile)
         self.assertEqual(notification.status, TelegramNotification.Status.PENDING)
 
+    def test_order_creation_queues_notification(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            order = self.create_order(
+                self.contact,
+                manager=self.manager,
+                status=Order.Status.NEW,
+                deadline=timezone.localdate() + timedelta(days=4),
+                unit_price="320.00",
+            )
+
+        notification = TelegramNotification.objects.get(order=order, notification_type=TelegramNotification.Type.ORDER_CREATED)
+        self.assertEqual(notification.profile, self.manager.profile)
+        self.assertEqual(notification.status, TelegramNotification.Status.PENDING)
+
     def test_order_status_change_queues_notification(self):
         order = self.create_order(
             self.contact,
@@ -650,6 +734,44 @@ class TestTelegramNotifications(DashboardTestMixin, TestCase):
         notification = TelegramNotification.objects.get(order=order, notification_type=TelegramNotification.Type.ORDER_STATUS)
         self.assertEqual(notification.profile, self.manager.profile)
         self.assertIn("IN_PRODUCTION".lower(), notification.dedupe_key)
+
+    def test_order_comment_change_queues_notification(self):
+        order = self.create_order(
+            self.contact,
+            manager=self.manager,
+            status=Order.Status.NEW,
+            deadline=timezone.localdate() + timedelta(days=4),
+            unit_price="320.00",
+        )
+        TelegramNotification.objects.all().delete()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            order.comment = "Call client before shipment"
+            order.save(update_fields=["comment"])
+
+        notification = TelegramNotification.objects.get(order=order, notification_type=TelegramNotification.Type.ORDER_COMMENT)
+        self.assertEqual(notification.profile, self.manager.profile)
+        self.assertIn("Call client before shipment", notification.message_text)
+
+    def test_task_comment_change_queues_notification(self):
+        task = Task.objects.create(
+            client=self.client_entity,
+            contact=self.contact,
+            title="Comment task",
+            assigned_by=self.manager,
+            assigned_to=self.manager,
+            date=timezone.localdate() + timedelta(days=1),
+            status=Task.Status.NEW,
+        )
+        TelegramNotification.objects.all().delete()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            task.comment = "Need customer approval"
+            task.save(update_fields=["comment"])
+
+        notification = TelegramNotification.objects.get(task=task, notification_type=TelegramNotification.Type.TASK_COMMENT)
+        self.assertEqual(notification.profile, self.manager.profile)
+        self.assertIn("Need customer approval", notification.message_text)
 
     def test_stage_status_change_queues_production_notification(self):
         order = self.create_order(
@@ -676,22 +798,25 @@ class TestTelegramNotifications(DashboardTestMixin, TestCase):
 
     @patch("core.telegram.services.send_message")
     def test_process_notification_queue_sends_and_deduplicates_deadline_reminders(self, send_message_mock):
-        task = Task.objects.create(
-            client=self.client_entity,
-            contact=self.contact,
-            title="Deadline task",
-            assigned_by=self.manager,
-            assigned_to=self.manager,
-            date=timezone.localdate() + timedelta(days=1),
-            status=Task.Status.IN_PROGRESS,
-        )
-        order = self.create_order(
-            self.contact,
-            manager=self.manager,
-            status=Order.Status.IN_PROGRESS,
-            deadline=timezone.localdate() + timedelta(days=1),
-            unit_price="150.00",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            task = Task.objects.create(
+                client=self.client_entity,
+                contact=self.contact,
+                title="Deadline task",
+                assigned_by=self.manager,
+                assigned_to=self.manager,
+                date=timezone.localdate() + timedelta(days=1),
+                status=Task.Status.IN_PROGRESS,
+            )
+            order = self.create_order(
+                self.contact,
+                manager=self.manager,
+                status=Order.Status.IN_PROGRESS,
+                deadline=timezone.localdate() + timedelta(days=1),
+                unit_price="150.00",
+            )
+
+        TelegramNotification.objects.all().delete()
 
         send_message_mock.return_value = {"message_id": 99}
 
@@ -727,9 +852,11 @@ class TestTelegramNotifications(DashboardTestMixin, TestCase):
         self.manager.profile.refresh_from_db()
         self.assertTrue(self.manager.profile.telegram_notifications_enabled)
         self.assertFalse(self.manager.profile.telegram_notify_new_tasks)
+        self.assertFalse(self.manager.profile.telegram_notify_new_orders)
         self.assertTrue(self.manager.profile.telegram_notify_deadlines)
         self.assertFalse(self.manager.profile.telegram_notify_overdue)
         self.assertTrue(self.manager.profile.telegram_notify_order_updates)
+        self.assertFalse(self.manager.profile.telegram_notify_comments)
         self.assertFalse(self.manager.profile.telegram_notify_production_events)
 
 
@@ -894,8 +1021,8 @@ class TestSeedDemoDataCommand(TestCase):
             UserProfile.objects.get(user__username="demo_production").role,
             UserProfile.Role.PRODUCTION,
         )
-        self.assertEqual(Order.objects.filter(comment__startswith="[seed-demo]").count(), 14)
-        self.assertEqual(Task.objects.filter(comment__startswith="[seed-demo]").count(), 6)
+        self.assertEqual(Order.objects.filter(comment__startswith="[демо]").count(), 14)
+        self.assertEqual(Task.objects.filter(comment__startswith="[демо]").count(), 6)
         self.assertGreaterEqual(ProductionSlot.objects.count(), 13)
         self.assertTrue(
             ProductionStage.objects.filter(status=ProductionStage.Status.BLOCKED).exists()
@@ -919,7 +1046,7 @@ class TestSeedDemoDataCommand(TestCase):
             ).exists()
         )
         self.assertTrue(Machine.objects.filter(is_active=False).exists())
-        self.assertEqual(ResourceDowntime.objects.filter(comment__startswith="[seed-demo]").count(), 2)
+        self.assertEqual(ResourceDowntime.objects.filter(comment__startswith="[демо]").count(), 2)
         self.assertEqual(TelegramUpdateLog.objects.count(), 3)
         self.assertTrue(
             TelegramNotification.objects.filter(
@@ -945,9 +1072,9 @@ class TestSeedDemoDataCommand(TestCase):
         self.run_seed()
         self.run_seed()
 
-        self.assertEqual(Order.objects.filter(comment__startswith="[seed-demo]").count(), 14)
-        self.assertEqual(Task.objects.filter(comment__startswith="[seed-demo]").count(), 6)
-        self.assertEqual(ResourceDowntime.objects.filter(comment__startswith="[seed-demo]").count(), 2)
+        self.assertEqual(Order.objects.filter(comment__startswith="[демо]").count(), 14)
+        self.assertEqual(Task.objects.filter(comment__startswith="[демо]").count(), 6)
+        self.assertEqual(ResourceDowntime.objects.filter(comment__startswith="[демо]").count(), 2)
         self.assertEqual(TelegramUpdateLog.objects.count(), 3)
         self.assertEqual(
             get_user_model().objects.filter(

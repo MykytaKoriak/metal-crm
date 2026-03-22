@@ -8,21 +8,21 @@ from django.utils import timezone
 
 from core.models import TelegramNotification, TelegramUpdateLog, UserProfile
 from core.telegram.services import enqueue_deadline_notifications
-from crm.models import Client, Contact, Order, OrderItem, Product, Tag, Task
+from crm.models import Client, Contact, Order, OrderItem, Product, ProductProductionNorm, Tag, Task
 from crm.services import sync_order_status_from_production
 from manufacture.models import Machine, ProductionSlot, ProductionStage, ResourceDowntime, WorkUnit
 from manufacture.services import find_next_available_window, planner_execution
 
 
 class Command(BaseCommand):
-    help = "Seed a rich demo dataset for CRM, production, reporting, and Telegram scenarios."
+    help = "Створює насичений демо-набір даних для CRM, виробництва, звітів і Telegram-сценаріїв."
 
-    seed_prefix = "[seed-demo]"
+    seed_prefix = "[демо]"
     demo_user_specs = (
         {
             "username": "demo_admin",
             "email": "demo_admin@example.com",
-            "full_name": "Demo Administrator",
+            "full_name": "Демо адміністратор",
             "role": UserProfile.Role.ADMIN,
             "phone": "+380000100001",
             "telegram_chat_id": "",
@@ -31,7 +31,7 @@ class Command(BaseCommand):
         {
             "username": "demo_manager",
             "email": "demo_manager@example.com",
-            "full_name": "Demo Sales Manager",
+            "full_name": "Демо менеджер з продажу",
             "role": UserProfile.Role.SALES_MANAGER,
             "phone": "+380000100002",
             "telegram_chat_id": "91001",
@@ -40,7 +40,7 @@ class Command(BaseCommand):
         {
             "username": "demo_production",
             "email": "demo_production@example.com",
-            "full_name": "Demo Production Lead",
+            "full_name": "Демо керівник виробництва",
             "role": UserProfile.Role.PRODUCTION,
             "phone": "+380000100003",
             "telegram_chat_id": "91002",
@@ -49,7 +49,7 @@ class Command(BaseCommand):
         {
             "username": "demo_executive",
             "email": "demo_executive@example.com",
-            "full_name": "Demo Executive",
+            "full_name": "Демо керівник",
             "role": UserProfile.Role.EXECUTIVE,
             "phone": "+380000100004",
             "telegram_chat_id": "91003",
@@ -58,7 +58,7 @@ class Command(BaseCommand):
     )
 
     def _seed_marker(self, key):
-        return f"{self.seed_prefix}:{key}"
+        return self.seed_prefix
 
     def _seed_text(self, key, label):
         return f"{self._seed_marker(key)} {label}"
@@ -145,6 +145,15 @@ class Command(BaseCommand):
         )
         return product
 
+    def _ensure_product_norm(self, product, **defaults):
+        norm, _ = ProductProductionNorm.objects.update_or_create(
+            product=product,
+            stage_type=defaults["stage_type"],
+            version=defaults.get("version", "v1"),
+            defaults=defaults,
+        )
+        return norm
+
     def _ensure_machine(self, **defaults):
         machine, _ = Machine.objects.update_or_create(
             name=defaults["name"],
@@ -176,14 +185,14 @@ class Command(BaseCommand):
             status=status,
             deadline=deadline,
             delivery_method=Order.DeliveryMethod.NOVA_POSHTA,
-            shipping_address=f"{self._seed_marker(key)} Warehouse pickup point",
+            shipping_address=f"{self._seed_marker(key)} Пункт самовивозу зі складу",
             recipient=contact.full_name,
             recipient_phone=contact.phone,
-            tracking_number=f"SEED-{key.upper()[:10]}",
+            tracking_number=f"ДЕМО-{sum(ord(ch) for ch in key):05d}",
             payment_type=Order.PaymentType.PREPAY,
-            payment_terms="50% upfront, 50% before shipment",
+            payment_terms="50% передоплата, 50% перед відвантаженням",
             payment_amount=Decimal("0.00"),
-            comment=self._seed_text(key, title_note or f"Demo order {key}"),
+            comment=self._seed_text(key, title_note or "Демонстраційне замовлення"),
         )
         total = Decimal("0.00")
         created_items = []
@@ -193,7 +202,7 @@ class Command(BaseCommand):
                 product=item_data["product"],
                 quantity=item_data.get("quantity", 1),
                 unit_price=item_data.get("unit_price", item_data["product"].base_price or Decimal("0.00")),
-                comment=self._seed_text(f"{key}-item-{index}", "Demo order item"),
+                comment=self._seed_text(f"{key}-item-{index}", "Демонстраційна позиція замовлення"),
             )
             total += (order_item.unit_price or Decimal("0.00")) * order_item.quantity
             created_items.append(order_item)
@@ -228,7 +237,7 @@ class Command(BaseCommand):
     ):
         window = find_next_available_window(resource, start_from, duration)
         if not window:
-            raise CommandError(f"Unable to find free window for resource '{resource}' in seed scenario '{key}'.")
+            raise CommandError(f"Не вдалося знайти вільне вікно для ресурсу '{resource}' у демо-сценарії '{key}'.")
 
         start_datetime, end_datetime = window
         slot = ProductionSlot(
@@ -242,13 +251,13 @@ class Command(BaseCommand):
             planning_source=planning_source,
             is_locked=is_locked,
             purpose=purpose or (f"{stage.order_item.product.name} / {stage.get_stage_type_display()}" if stage else ""),
-            comment=self._seed_text(key, comment or "Demo production slot"),
+            comment=self._seed_text(key, comment or "Демонстраційний виробничий слот"),
             dispatcher_comment=dispatcher_comment,
         )
         setattr(slot, resource_field, resource)
         slot._planner_operation = True
         slot._history_source = "auto" if planning_mode == ProductionSlot.PlanningMode.AUTO else "system"
-        slot._history_note = self._seed_text(key, "Seed generated slot")
+        slot._history_note = self._seed_text(key, "Слот створено демо-наповненням")
         slot._changed_by = responsible
         slot.save()
         return slot, start_datetime, end_datetime
@@ -260,7 +269,7 @@ class Command(BaseCommand):
         stage.planned_end = end_datetime
         stage.started_at = start_datetime
         stage.completed_at = end_datetime
-        stage.comment = self._seed_text(key, "Completed in seed without dedicated slot")
+        stage.comment = self._seed_text(key, "Завершено в демо без окремого слота")
         stage._changed_by = responsible
         stage.save(
             update_fields=[
@@ -318,7 +327,10 @@ class Command(BaseCommand):
         stage.responsible = responsible
         stage.planned_start = start_datetime
         stage.planned_end = end_datetime
-        stage.comment = self._seed_text(key, comment or f"Stage configured as {status}")
+        stage.comment = self._seed_text(
+            key,
+            comment or f"Етап налаштовано зі статусом «{ProductionStage.Status(status).label}»",
+        )
         if status in {ProductionStage.Status.IN_PROGRESS, ProductionStage.Status.DONE, ProductionStage.Status.BLOCKED}:
             stage.started_at = start_datetime
         else:
@@ -347,7 +359,7 @@ class Command(BaseCommand):
         stage.responsible = responsible
         stage.started_at = None
         stage.completed_at = timezone.now()
-        stage.comment = self._seed_text(key, "Cancelled in seed")
+        stage.comment = self._seed_text(key, "Скасовано в демо-сценарії")
         stage._changed_by = responsible
         stage.save(update_fields=["status", "responsible", "started_at", "completed_at", "comment", "updated_at"])
 
@@ -383,7 +395,7 @@ class Command(BaseCommand):
                 TelegramUpdateLog.Status.IGNORED,
                 {"message": {"text": "/unknown"}},
                 "message",
-                "Unsupported command",
+                "Непідтримувана команда",
             ),
         )
         for update_id, chat_id, username, status, payload, update_type, error_message in payloads:
@@ -406,7 +418,7 @@ class Command(BaseCommand):
             defaults={
                 "profile": manager_profile,
                 "notification_type": TelegramNotification.Type.ORDER_STATUS,
-                "message_text": "Seed demo: order summary already delivered.",
+                "message_text": "Демо: зведення по замовленню вже доставлено.",
                 "payload": {"source": "seed-demo"},
                 "order": order,
                 "status": TelegramNotification.Status.SENT,
@@ -421,7 +433,7 @@ class Command(BaseCommand):
             defaults={
                 "profile": production_profile,
                 "notification_type": TelegramNotification.Type.PRODUCTION_EVENT,
-                "message_text": "Seed demo: failed production event delivery.",
+                "message_text": "Демо: не вдалося доставити подію виробництва.",
                 "payload": {"source": "seed-demo"},
                 "order": order,
                 "stage": stage,
@@ -429,7 +441,7 @@ class Command(BaseCommand):
                 "scheduled_for": timezone.now() - timedelta(hours=2),
                 "sent_at": None,
                 "delivery_attempts": 1,
-                "error_message": "Seed demo transport error.",
+                "error_message": "Демо: транспортна помилка доставки.",
             },
         )
         TelegramNotification.objects.update_or_create(
@@ -437,7 +449,7 @@ class Command(BaseCommand):
             defaults={
                 "profile": manager_profile,
                 "notification_type": TelegramNotification.Type.TASK_CREATED,
-                "message_text": "Seed demo: pending task notification.",
+                "message_text": "Демо: очікує сповіщення по задачі.",
                 "payload": {"source": "seed-demo"},
                 "task": task,
                 "order": task.order,
@@ -451,7 +463,7 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
-        self.stdout.write(self.style.MIGRATE_HEADING("CRM DEMO SEED START"))
+        self.stdout.write(self.style.MIGRATE_HEADING("ПОЧАТОК ДЕМО-НАПОВНЕННЯ CRM"))
 
         now = timezone.now()
         today = timezone.localdate()
@@ -469,102 +481,102 @@ class Command(BaseCommand):
             executive = users["demo_executive"]
             manager_profile = manager.profile
             production_profile = production_user.profile
-            self.stdout.write(self.style.SUCCESS("Demo users and roles ready"))
+            self.stdout.write(self.style.SUCCESS("Демо-користувачі та ролі готові"))
 
             tags = {
                 name: Tag.objects.get_or_create(name=name)[0]
-                for name in ("seed-demo", "b2b", "b2c", "priority", "risk")
+                for name in ("демо", "бізнес", "роздріб", "пріоритет", "ризик")
             }
-            self.stdout.write(self.style.SUCCESS("Tags ready"))
+            self.stdout.write(self.style.SUCCESS("Теги готові"))
 
             client_alpha = self._ensure_client(
-                name="Alpha Power Systems",
+                name="Альфа Енерго Системи",
                 client_type=Client.ClientType.TOV,
                 tax_code="12345678",
                 phones="+380671111111",
                 email="alpha@example.com",
                 source=Client.Source.PROM,
-                notes=self._seed_text("alpha-client", "B2B client for production demo"),
+                notes=self._seed_text("alpha-client", "Бізнес-клієнт для демонстрації виробництва"),
             )
             client_retail = self._ensure_client(
-                name="Retail Home Customer",
+                name="Роздрібний клієнт",
                 client_type=Client.ClientType.INDIVIDUAL,
                 tax_code="",
                 phones="+380672222222",
                 email="retail@example.com",
                 source=Client.Source.INSTAGRAM,
-                notes=self._seed_text("retail-client", "B2C client for task board demo"),
+                notes=self._seed_text("retail-client", "Роздрібний клієнт для демонстрації задач"),
             )
             client_gamma = self._ensure_client(
-                name="Gamma Trade",
+                name="Гамма Трейд",
                 client_type=Client.ClientType.FOP,
                 tax_code="1234567890",
                 phones="+380673333333",
                 email="gamma@example.com",
                 source=Client.Source.RECOMMENDATION,
-                notes=self._seed_text("gamma-client", "Repeat customer with urgent orders"),
+                notes=self._seed_text("gamma-client", "Постійний клієнт із терміновими замовленнями"),
             )
             client_delta = self._ensure_client(
-                name="Delta Energy",
+                name="Дельта Енерго",
                 client_type=Client.ClientType.TOV,
                 tax_code="87654321",
                 phones="+380674444444",
                 email="delta@example.com",
                 source=Client.Source.OTHER,
-                notes=self._seed_text("delta-client", "Used for ready and completed scenarios"),
+                notes=self._seed_text("delta-client", "Використовується для готових і завершених сценаріїв"),
             )
-            client_alpha.tags.set([tags["seed-demo"], tags["b2b"]])
-            client_retail.tags.set([tags["seed-demo"], tags["b2c"]])
-            client_gamma.tags.set([tags["seed-demo"], tags["b2b"], tags["priority"]])
-            client_delta.tags.set([tags["seed-demo"], tags["b2b"], tags["risk"]])
+            client_alpha.tags.set([tags["демо"], tags["бізнес"]])
+            client_retail.tags.set([tags["демо"], tags["роздріб"]])
+            client_gamma.tags.set([tags["демо"], tags["бізнес"], tags["пріоритет"]])
+            client_delta.tags.set([tags["демо"], tags["бізнес"], tags["ризик"]])
 
             contact_alpha = self._ensure_contact(
                 client_alpha,
-                full_name="Alice Buyer",
-                position="Procurement",
+                full_name="Олександр Бондар",
+                position="Закупівлі",
                 phone="+380671111112",
                 email="alice.buyer@example.com",
                 source=Contact.Source.PROM,
-                notes=self._seed_text("alpha-contact", "Main B2B contact"),
+                notes=self._seed_text("alpha-contact", "Основний контакт бізнес-клієнта"),
             )
             contact_retail = self._ensure_contact(
                 client_retail,
-                full_name="Roman Retail",
+                full_name="Ірина Мельник",
                 position="",
                 phone="+380672222223",
                 email="roman.retail@example.com",
                 source=Contact.Source.INSTAGRAM,
-                notes=self._seed_text("retail-contact", "Retail contact"),
+                notes=self._seed_text("retail-contact", "Контакт роздрібного клієнта"),
             )
             contact_gamma = self._ensure_contact(
                 client_gamma,
-                full_name="Greg Owner",
-                position="Owner",
+                full_name="Григорій Савчук",
+                position="Власник",
                 phone="+380673333334",
                 email="greg.owner@example.com",
                 source=Contact.Source.RECOMMENDATION,
-                notes=self._seed_text("gamma-contact", "Urgent account owner"),
+                notes=self._seed_text("gamma-contact", "Власник термінового акаунта"),
             )
             contact_delta = self._ensure_contact(
                 client_delta,
-                full_name="Diana Operations",
-                position="Operations Manager",
+                full_name="Діана Петренко",
+                position="Операційний менеджер",
                 phone="+380674444445",
                 email="diana.ops@example.com",
                 source=Contact.Source.OTHER,
-                notes=self._seed_text("delta-contact", "Operations contact"),
+                notes=self._seed_text("delta-contact", "Операційний контакт"),
             )
-            contact_alpha.tags.set([tags["seed-demo"], tags["b2b"]])
-            contact_retail.tags.set([tags["seed-demo"], tags["b2c"]])
-            contact_gamma.tags.set([tags["seed-demo"], tags["priority"]])
-            contact_delta.tags.set([tags["seed-demo"], tags["risk"]])
-            self.stdout.write(self.style.SUCCESS("Clients and contacts ready"))
+            contact_alpha.tags.set([tags["демо"], tags["бізнес"]])
+            contact_retail.tags.set([tags["демо"], tags["роздріб"]])
+            contact_gamma.tags.set([tags["демо"], tags["пріоритет"]])
+            contact_delta.tags.set([tags["демо"], tags["ризик"]])
+            self.stdout.write(self.style.SUCCESS("Клієнти та контакти готові"))
 
             product_box = self._ensure_product(
                 sku="DEMO-GEN-BOX",
-                name="Generator Box",
-                description="Protective housing for backup generator installations.",
-                technical_description="Laser cutting, bending, welding, painting, and final assembly.",
+                name="Бокс для генератора",
+                description="Захисний корпус для резервних генераторних установок.",
+                technical_description="Лазерне різання, гнуття, зварювання, фарбування та фінальне складання.",
                 base_price=Decimal("7200.00"),
                 prom_url="https://example.com/prom/demo-gen-box",
                 rozetka_url="https://example.com/rozetka/demo-gen-box",
@@ -576,9 +588,9 @@ class Command(BaseCommand):
             )
             product_stand = self._ensure_product(
                 sku="DEMO-GEN-STAND",
-                name="Generator Stand",
-                description="Support stand for generator box installations.",
-                technical_description="Welded frame, anti-vibration pads, quick mounting kit.",
+                name="Підставка для генератора",
+                description="Опорна підставка для встановлення генераторного боксу.",
+                technical_description="Зварна рама, антивібраційні опори та швидкий монтажний комплект.",
                 base_price=Decimal("3400.00"),
                 prom_url="https://example.com/prom/demo-stand",
                 rozetka_url="https://example.com/rozetka/demo-stand",
@@ -590,9 +602,9 @@ class Command(BaseCommand):
             )
             product_canopy = self._ensure_product(
                 sku="DEMO-SOLAR-CANOPY",
-                name="Solar Canopy Frame",
-                description="Frame set for rooftop canopy projects.",
-                technical_description="Mixed laser, welding, painting, and assembly operations.",
+                name="Рама сонячного навісу",
+                description="Комплект рами для проєктів дахового навісу.",
+                technical_description="Комбіновані операції лазера, зварювання, фарбування та складання.",
                 base_price=Decimal("12800.00"),
                 prom_url="https://example.com/prom/demo-canopy",
                 rozetka_url="https://example.com/rozetka/demo-canopy",
@@ -604,9 +616,9 @@ class Command(BaseCommand):
             )
             product_service = self._ensure_product(
                 sku="DEMO-SERVICE-KIT",
-                name="Service Mounting Kit",
-                description="Small accessory item used for fast demo orders.",
-                technical_description="Mostly storage and assembly operations.",
+                name="Монтажний сервісний комплект",
+                description="Невелика позиція для швидких демонстраційних замовлень.",
+                technical_description="Переважно складські та складальні операції.",
                 base_price=Decimal("1200.00"),
                 prom_url="https://example.com/prom/demo-service-kit",
                 rozetka_url="https://example.com/rozetka/demo-service-kit",
@@ -616,63 +628,109 @@ class Command(BaseCommand):
                 production_norms_url="https://example.com/assets/demo-service-kit/norms",
                 is_active=True,
             )
-            self.stdout.write(self.style.SUCCESS("Products and production norm links ready"))
+            norm_specs = {
+                product_box: (
+                    (ProductionStage.StageType.INTAKE, Decimal("0.50"), Decimal("0.100")),
+                    (ProductionStage.StageType.PROCUREMENT, Decimal("0.75"), Decimal("0.350")),
+                    (ProductionStage.StageType.EXECUTION, Decimal("2.50"), Decimal("1.400")),
+                    (ProductionStage.StageType.PAINTING, Decimal("1.25"), Decimal("0.600")),
+                    (ProductionStage.StageType.READY_TO_SHIP, Decimal("0.50"), Decimal("0.050")),
+                ),
+                product_stand: (
+                    (ProductionStage.StageType.INTAKE, Decimal("0.40"), Decimal("0.080")),
+                    (ProductionStage.StageType.PROCUREMENT, Decimal("0.60"), Decimal("0.250")),
+                    (ProductionStage.StageType.EXECUTION, Decimal("1.80"), Decimal("0.900")),
+                    (ProductionStage.StageType.PAINTING, Decimal("0.75"), Decimal("0.300")),
+                    (ProductionStage.StageType.READY_TO_SHIP, Decimal("0.40"), Decimal("0.030")),
+                ),
+                product_canopy: (
+                    (ProductionStage.StageType.INTAKE, Decimal("0.60"), Decimal("0.120")),
+                    (ProductionStage.StageType.PROCUREMENT, Decimal("1.00"), Decimal("0.400")),
+                    (ProductionStage.StageType.EXECUTION, Decimal("3.25"), Decimal("1.800")),
+                    (ProductionStage.StageType.PAINTING, Decimal("1.60"), Decimal("0.900")),
+                    (ProductionStage.StageType.READY_TO_SHIP, Decimal("0.75"), Decimal("0.080")),
+                ),
+                product_service: (
+                    (ProductionStage.StageType.INTAKE, Decimal("0.25"), Decimal("0.020")),
+                    (ProductionStage.StageType.PROCUREMENT, Decimal("0.40"), Decimal("0.080")),
+                    (ProductionStage.StageType.EXECUTION, Decimal("0.90"), Decimal("0.150")),
+                    (ProductionStage.StageType.PAINTING, Decimal("0.30"), Decimal("0.050")),
+                    (ProductionStage.StageType.READY_TO_SHIP, Decimal("0.25"), Decimal("0.010")),
+                ),
+            }
+            for product, specs in norm_specs.items():
+                for stage_type, time_value, material_value in specs:
+                    self._ensure_product_norm(
+                        product,
+                        stage_type=stage_type,
+                        time_value=time_value,
+                        time_unit=ProductProductionNorm.TimeUnit.HOURS,
+                        material_value=material_value,
+                        material_unit=ProductProductionNorm.MaterialUnit.SQUARE_METER,
+                        version="demo-v1",
+                        comment=self._seed_text(
+                            f"{product.sku.lower()}-{stage_type}",
+                            f"Демо-норма для {product.name} / {stage_type}",
+                        ),
+                        is_active=True,
+                    )
+            self.stdout.write(self.style.SUCCESS("Продукти та структуровані норми виробництва готові"))
 
             laser_main = self._ensure_machine(
-                name="Demo Laser Main",
+                name="Демо лазер основний",
                 type=Machine.MachineType.LASER,
                 is_active=True,
                 available_weekdays="0,1,2,3,4",
                 workday_start=time(8, 0),
                 workday_end=time(17, 0),
-                comment=self._seed_text("machine-main", "Primary laser resource"),
+                comment=self._seed_text("machine-main", "Основний лазерний ресурс"),
             )
             laser_overload = self._ensure_machine(
-                name="Demo Laser Overload",
+                name="Демо лазер перевантаження",
                 type=Machine.MachineType.LASER,
                 is_active=True,
                 available_weekdays="0,1,2,3,4,5,6",
                 workday_start=time(8, 0),
                 workday_end=time(9, 0),
-                comment=self._seed_text("machine-overload", "Short workday resource for overload report"),
+                comment=self._seed_text("machine-overload", "Ресурс із коротким робочим днем для звіту по перевантаженню"),
             )
             paint_machine = self._ensure_machine(
-                name="Demo Paint Booth",
+                name="Демо фарбувальна камера",
                 type=Machine.MachineType.PAINTING,
                 is_active=True,
                 available_weekdays="0,1,2,3,4",
                 workday_start=time(10, 0),
                 workday_end=time(18, 0),
-                comment=self._seed_text("machine-paint", "Painting resource"),
+                comment=self._seed_text("machine-paint", "Ресурс для фарбування"),
             )
             self._ensure_machine(
-                name="Demo Reserve Laser",
+                name="Демо резервний лазер",
                 type=Machine.MachineType.LASER,
                 is_active=False,
                 available_weekdays="0,1,2,3,4",
                 workday_start=time(8, 0),
                 workday_end=time(17, 0),
-                comment=self._seed_text("machine-reserve", "Inactive resource to show availability constraints"),
+                comment=self._seed_text("machine-reserve", "Неактивний ресурс для демонстрації обмежень доступності"),
             )
             storage_unit = self._ensure_workunit(
-                name="Demo Storage",
+                name="Демо склад",
                 type=WorkUnit.UnitType.STORAGE,
                 is_active=True,
                 available_weekdays="0,1,2,3,4,5",
                 workday_start=time(8, 0),
                 workday_end=time(18, 0),
-                comment=self._seed_text("unit-storage", "Storage and ready to ship operations"),
+                comment=self._seed_text("unit-storage", "Складські операції та підготовка до відправлення"),
             )
             assembly_unit = self._ensure_workunit(
-                name="Demo Assembly",
+                name="Демо складання",
                 type=WorkUnit.UnitType.ASSEMBLY,
                 is_active=True,
                 available_weekdays="0,1,2,3,4",
                 workday_start=time(8, 0),
                 workday_end=time(17, 0),
-                comment=self._seed_text("unit-assembly", "Assembly workunit"),
+                comment=self._seed_text("unit-assembly", "Дільниця складання"),
             )
-            self.stdout.write(self.style.SUCCESS("Production resources ready"))
+            self.stdout.write(self.style.SUCCESS("Виробничі ресурси готові"))
 
             ResourceDowntime.objects.create(
                 machine=laser_main,
@@ -680,7 +738,7 @@ class Command(BaseCommand):
                 start_datetime=self._make_dt(1, 9, 0),
                 end_datetime=self._make_dt(1, 12, 0),
                 is_blocking=True,
-                comment=self._seed_text("downtime-main", "Laser maintenance window"),
+                comment=self._seed_text("downtime-main", "Вікно техобслуговування лазера"),
             )
             ResourceDowntime.objects.create(
                 work_unit=assembly_unit,
@@ -688,9 +746,9 @@ class Command(BaseCommand):
                 start_datetime=self._make_dt(2, 14, 0),
                 end_datetime=self._make_dt(2, 16, 0),
                 is_blocking=True,
-                comment=self._seed_text("downtime-assembly", "Assembly manual block"),
+                comment=self._seed_text("downtime-assembly", "Ручне блокування дільниці складання"),
             )
-            self.stdout.write(self.style.SUCCESS("Downtimes ready"))
+            self.stdout.write(self.style.SUCCESS("Простої готові"))
 
             order_new, _ = self._create_order(
                 key="new-order",
@@ -700,7 +758,7 @@ class Command(BaseCommand):
                 priority=Order.Priority.NORMAL,
                 deadline=self._business_date(6),
                 status=Order.Status.NEW,
-                title_note="Fresh order without production slots yet",
+                title_note="Нове замовлення без виробничих слотів",
             )
             order_new = self._sync_order(order_new)
 
@@ -712,7 +770,7 @@ class Command(BaseCommand):
                 priority=Order.Priority.URGENT,
                 deadline=self._business_date(-1),
                 status=Order.Status.NEW,
-                title_note="Urgent overdue order with active production risk",
+                title_note="Термінове прострочене замовлення з активним виробничим ризиком",
             )
             risk_item = risk_items[0]
             self._mark_stage_done_without_slot(
@@ -742,7 +800,7 @@ class Command(BaseCommand):
                 status=ProductionStage.Status.IN_PROGRESS,
                 planning_mode=ProductionSlot.PlanningMode.AUTO,
                 planning_source=ProductionSlot.PlanningSource.PLANNER,
-                comment="Execution started but is already overdue",
+                comment="Виконання розпочато, але етап уже прострочений",
             )
             order_risk = self._sync_order(order_risk)
 
@@ -754,7 +812,7 @@ class Command(BaseCommand):
                 priority=Order.Priority.HIGH,
                 deadline=self._business_date(1),
                 status=Order.Status.NEW,
-                title_note="Blocked production order with manual slot",
+                title_note="Заблоковане виробниче замовлення з ручним слотом",
             )
             blocked_item = blocked_items[0]
             self._mark_stage_done_without_slot(
@@ -785,8 +843,8 @@ class Command(BaseCommand):
                 planning_mode=ProductionSlot.PlanningMode.MANUAL,
                 planning_source=ProductionSlot.PlanningSource.DISPATCHER,
                 is_locked=True,
-                dispatcher_comment="Waiting for final technical approval",
-                comment="Blocked after manual intervention",
+                dispatcher_comment="Очікує фінального технічного погодження",
+                comment="Заблоковано після ручного втручання",
             )
             order_blocked = self._sync_order(order_blocked)
 
@@ -798,7 +856,7 @@ class Command(BaseCommand):
                 priority=Order.Priority.NORMAL,
                 deadline=self._business_date(2),
                 status=Order.Status.NEW,
-                title_note="Ready order with finished production chain",
+                title_note="Готове замовлення із завершеним виробничим ланцюгом",
             )
             ready_item = ready_items[0]
             self._mark_stage_done_without_slot(
@@ -827,7 +885,7 @@ class Command(BaseCommand):
                 status=ProductionStage.Status.DONE,
                 planning_mode=ProductionSlot.PlanningMode.AUTO,
                 planning_source=ProductionSlot.PlanningSource.PLANNER,
-                comment="Execution finished automatically",
+                comment="Виконання завершено автоматично",
             )
             _, _, ready_paint_end = self._mark_stage_with_slot(
                 key="ready-painting",
@@ -842,8 +900,8 @@ class Command(BaseCommand):
                 planning_mode=ProductionSlot.PlanningMode.MANUAL,
                 planning_source=ProductionSlot.PlanningSource.DISPATCHER,
                 is_locked=True,
-                dispatcher_comment="Manual correction after paint queue review",
-                comment="Painting finished on manual slot",
+                dispatcher_comment="Ручне коригування після перегляду черги на фарбування",
+                comment="Фарбування завершено в ручному слоті",
             )
             self._mark_stage_done_without_slot(
                 key="ready-shipping",
@@ -862,7 +920,7 @@ class Command(BaseCommand):
                 priority=Order.Priority.NORMAL,
                 deadline=self._business_date(-2),
                 status=Order.Status.NEW,
-                title_note="Completed order for conversion stats",
+                title_note="Завершене замовлення для статистики конверсії",
             )
             completed_item = completed_items[0]
             self._mark_stage_done_without_slot(
@@ -891,7 +949,7 @@ class Command(BaseCommand):
                 status=ProductionStage.Status.DONE,
                 planning_mode=ProductionSlot.PlanningMode.AUTO,
                 planning_source=ProductionSlot.PlanningSource.PLANNER,
-                comment="Completed historical execution stage",
+                comment="Історичний етап виконання завершено",
             )
             self._mark_stage_done_without_slot(
                 key="completed-painting",
@@ -920,7 +978,7 @@ class Command(BaseCommand):
                 priority=Order.Priority.LOW,
                 deadline=self._business_date(4),
                 status=Order.Status.NEW,
-                title_note="Canceled order for dashboard conversion",
+                title_note="Скасоване замовлення для конверсії на панелі",
             )
             canceled_item = canceled_items[0]
             for stage_key, stage_type in (
@@ -938,7 +996,7 @@ class Command(BaseCommand):
             order_canceled.status = Order.Status.CANCELED
             order_canceled._changed_by = manager
             order_canceled.save(update_fields=["status"])
-            self.stdout.write(self.style.SUCCESS("Primary order scenarios ready"))
+            self.stdout.write(self.style.SUCCESS("Основні сценарії замовлень готові"))
 
             overload_start = self._make_dt(0, 8, 0)
             for index in range(8):
@@ -950,7 +1008,7 @@ class Command(BaseCommand):
                     priority=Order.Priority.HIGH if index < 4 else Order.Priority.NORMAL,
                     deadline=today + timedelta(days=index + 1),
                     status=Order.Status.NEW,
-                    title_note=f"Overload scenario #{index + 1}",
+                    title_note=f"Сценарій перевантаження №{index + 1}",
                 )
                 overload_item = overload_items[0]
                 self._mark_stage_done_without_slot(
@@ -979,83 +1037,83 @@ class Command(BaseCommand):
                     status=ProductionStage.Status.SCHEDULED,
                     planning_mode=ProductionSlot.PlanningMode.AUTO,
                     planning_source=ProductionSlot.PlanningSource.PLANNER,
-                    comment=f"Reserved overload capacity #{index + 1}",
+                    comment=f"Зарезервована потужність перевантаження №{index + 1}",
                 )
                 self._sync_order(overload_order)
-            self.stdout.write(self.style.SUCCESS("Overload and queue scenarios ready"))
+            self.stdout.write(self.style.SUCCESS("Сценарії перевантаження та черги готові"))
 
             tasks = [
                 Task(
                     client=client_gamma,
                     contact=contact_gamma,
                     order=order_risk,
-                    title="Call client about overdue urgent order",
+                    title="Зв’язатися з клієнтом щодо простроченого термінового замовлення",
                     assigned_by=manager,
                     assigned_to=manager,
                     date=today - timedelta(days=2),
                     status=Task.Status.NEW,
-                    comment=self._seed_text("task-overdue-new", "Manager must explain delay"),
+                    comment=self._seed_text("task-overdue-new", "Менеджер має пояснити затримку"),
                 ),
                 Task(
                     client=client_alpha,
                     contact=contact_alpha,
                     order=order_blocked,
-                    title="Prepare technical clarification for blocked order",
+                    title="Підготувати технічне уточнення для заблокованого замовлення",
                     assigned_by=manager,
                     assigned_to=production_user,
                     date=today,
                     status=Task.Status.IN_PROGRESS,
-                    comment=self._seed_text("task-in-progress", "Production follow-up"),
+                    comment=self._seed_text("task-in-progress", "Контроль виробничого продовження"),
                 ),
                 Task(
                     client=client_alpha,
                     contact=contact_alpha,
                     order=order_blocked,
-                    title="Await supplier confirmation",
+                    title="Очікувати підтвердження постачальника",
                     assigned_by=manager,
                     assigned_to=manager,
                     date=today - timedelta(days=1),
                     status=Task.Status.WAITING,
-                    comment=self._seed_text("task-waiting", "Waiting for external answer"),
+                    comment=self._seed_text("task-waiting", "Очікуємо зовнішню відповідь"),
                 ),
                 Task(
                     client=client_delta,
                     contact=contact_delta,
                     order=order_ready,
-                    title="Send ready order summary to client",
+                    title="Надіслати клієнту зведення по готовому замовленню",
                     assigned_by=manager,
                     assigned_to=manager,
                     date=today - timedelta(days=1),
                     status=Task.Status.DONE,
-                    comment=self._seed_text("task-done", "Documentation sent"),
+                    comment=self._seed_text("task-done", "Документацію надіслано"),
                 ),
                 Task(
                     client=client_delta,
                     contact=contact_delta,
                     order=order_new,
-                    title="Review executive weekly risk report",
+                    title="Переглянути щотижневий звіт про ризики для керівника",
                     assigned_by=manager,
                     assigned_to=executive,
                     date=today + timedelta(days=1),
                     status=Task.Status.NEW,
-                    comment=self._seed_text("task-executive", "Used for Telegram and dashboard demo"),
+                    comment=self._seed_text("task-executive", "Використовується для демонстрації Telegram і панелей"),
                 ),
                 Task(
                     client=client_retail,
                     contact=contact_retail,
                     order=order_new,
-                    title="Confirm delivery details with retail customer",
+                    title="Уточнити деталі доставки з роздрібним клієнтом",
                     assigned_by=manager,
                     assigned_to=manager,
                     date=today + timedelta(days=1),
                     status=Task.Status.IN_PROGRESS,
-                    comment=self._seed_text("task-deadline", "Near-term reminder scenario"),
+                    comment=self._seed_text("task-deadline", "Сценарій нагадування з близьким дедлайном"),
                 ),
             ]
             for task in tasks:
                 task._changed_by = task.assigned_by
                 task.save()
-            self.stdout.write(self.style.SUCCESS("Tasks across all statuses ready"))
+            self.stdout.write(self.style.SUCCESS("Задачі у всіх статусах готові"))
 
             enqueue_deadline_notifications(now=now)
             self._create_demo_updates()
@@ -1066,16 +1124,16 @@ class Command(BaseCommand):
                 task=tasks[-1],
                 stage=blocked_stage,
             )
-            self.stdout.write(self.style.SUCCESS("Telegram scenarios ready"))
+            self.stdout.write(self.style.SUCCESS("Telegram-сценарії готові"))
 
         self.stdout.write(
             self.style.SUCCESS(
-                "Seed summary: "
-                f"clients={Client.objects.count()} "
-                f"contacts={Contact.objects.count()} "
-                f"orders={Order.objects.count()} "
-                f"tasks={Task.objects.count()} "
-                f"slots={ProductionSlot.objects.count()}"
+                "Підсумок демо-наповнення: "
+                f"клієнтів={Client.objects.count()} "
+                f"контактів={Contact.objects.count()} "
+                f"замовлень={Order.objects.count()} "
+                f"задач={Task.objects.count()} "
+                f"слотів={ProductionSlot.objects.count()}"
             )
         )
-        self.stdout.write(self.style.SUCCESS("CRM DEMO SEED DONE"))
+        self.stdout.write(self.style.SUCCESS("ДЕМО-НАПОВНЕННЯ CRM ЗАВЕРШЕНО"))

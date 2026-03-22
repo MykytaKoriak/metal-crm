@@ -26,8 +26,18 @@ from core.visibility import (
     visible_manager_choices_queryset,
 )
 
-from .forms import ClientForm, ContactForm, OrderForm, OrderItemFormSet, ProductForm, TaskForm
-from .models import Client, Contact, Order, Product, Task
+from .forms import (
+    ClientForm,
+    ClientInteractionForm,
+    ContactForm,
+    OrderForm,
+    OrderItemFormSet,
+    ProductForm,
+    ProductProductionNormFormSet,
+    TaskForm,
+)
+from .interactions import create_client_interaction
+from .models import Client, ClientInteraction, Contact, Order, Product, ProductProductionNorm, Task
 
 
 MONEY_FIELD = DecimalField(max_digits=12, decimal_places=2)
@@ -48,6 +58,12 @@ TASK_STATUS_TONES = {
     Task.Status.IN_PROGRESS: "critical",
     Task.Status.WAITING: "warning",
     Task.Status.DONE: "healthy",
+}
+TASK_PRIORITY_TONES = {
+    Task.Priority.LOW: "healthy",
+    Task.Priority.NORMAL: "warning",
+    Task.Priority.HIGH: "warning",
+    Task.Priority.URGENT: "critical",
 }
 TASK_DEADLINE_OPTIONS = (
     ("", "Усі дедлайни"),
@@ -102,6 +118,10 @@ def _build_url(view_name, *, args=None, params=None, next_url=None):
     return url
 
 
+def _delivery_request_text():
+    return Order.delivery_request_template()
+
+
 def _safe_next_url(request):
     next_url = request.POST.get("next") or request.GET.get("next")
     if next_url and url_has_allowed_host_and_scheme(
@@ -137,6 +157,7 @@ def _client_workspace_context(request, client, current_url=None):
     can_change_client = request.user.has_perm("crm.change_client")
     can_delete_client = request.user.has_perm("crm.delete_client")
     can_add_contact = request.user.has_perm("crm.add_contact")
+    can_add_interaction = request.user.has_perm("crm.add_clientinteraction")
     can_add_order = request.user.has_perm("crm.add_order")
     can_add_task = request.user.has_perm("crm.add_task")
 
@@ -154,6 +175,13 @@ def _client_workspace_context(request, client, current_url=None):
             next_url=current_url,
         )
         if can_add_contact
+        else None,
+        "interaction_add_url": _build_url(
+            "crm_client_interaction_create",
+            args=[client.id],
+            next_url=current_url,
+        )
+        if can_add_interaction
         else None,
         "order_add_url": None,
         "task_add_url": None,
@@ -187,6 +215,7 @@ def _decorate_order(order, *, current_url, can_change_order, can_delete_order, t
     order.client_url = reverse("client_details", args=[order.contact.client_id])
     order.edit_url = _build_url("crm_order_update", args=[order.id], next_url=current_url) if can_change_order else None
     order.delete_url = _build_url("crm_order_delete", args=[order.id], next_url=current_url) if can_delete_order else None
+    order.delivery_request_text = order.get_delivery_request_text()
     order.is_overdue = bool(
         order.deadline and order.deadline < today and order.status not in [Order.Status.COMPLETED, Order.Status.CANCELED]
     )
@@ -223,6 +252,7 @@ def _tasks_base_queryset():
 def _task_filter_values(request):
     return {
         "search": _search_param(request),
+        "assigned_by": request.GET.get("assigned_by", "").strip(),
         "assigned_to": request.GET.get("assigned_to", "").strip(),
         "client_id": request.GET.get("client", "").strip(),
         "order_id": request.GET.get("order", "").strip(),
@@ -233,6 +263,7 @@ def _task_filter_values(request):
 
 def _apply_task_filters(queryset, *, request, filter_values, today, include_status=True):
     search = filter_values["search"]
+    selected_assigned_by = filter_values["assigned_by"]
     selected_assigned_to = filter_values["assigned_to"]
     selected_client_id = filter_values["client_id"]
     selected_order_id = filter_values["order_id"]
@@ -242,11 +273,19 @@ def _apply_task_filters(queryset, *, request, filter_values, today, include_stat
     if search:
         queryset = queryset.filter(
             Q(title__icontains=search)
+            | Q(description__icontains=search)
             | Q(comment__icontains=search)
             | Q(client__name__icontains=search)
             | Q(contact__full_name__icontains=search)
             | Q(order__title__icontains=search)
         )
+
+    if selected_assigned_by == "mine":
+        queryset = queryset.filter(assigned_by=request.user)
+    elif selected_assigned_by.isdigit():
+        queryset = queryset.filter(assigned_by_id=int(selected_assigned_by))
+    elif selected_assigned_by:
+        queryset = queryset.none()
 
     if selected_assigned_to == "mine":
         queryset = queryset.filter(assigned_to=request.user)
@@ -289,6 +328,25 @@ def _decorate_task(task, *, current_url, can_change_task, can_delete_task, can_c
     )
     task.is_overdue = task.status != Task.Status.DONE and task.date < today
     task.status_tone = TASK_STATUS_TONES.get(task.status, "warning")
+    task.priority_tone = TASK_PRIORITY_TONES.get(task.priority, "warning")
+
+
+def _decorate_interaction(interaction, *, current_url, can_change_task, can_change_order):
+    interaction.order_url = (
+        _build_url("crm_order_update", args=[interaction.order_id], next_url=current_url)
+        if interaction.order_id and can_change_order
+        else None
+    )
+    interaction.task_url = (
+        _build_url("crm_task_update", args=[interaction.task_id], next_url=current_url)
+        if interaction.task_id and can_change_task
+        else None
+    )
+    interaction.source_tone = {
+        ClientInteraction.Source.MANUAL: "healthy",
+        ClientInteraction.Source.AUTO: "warning",
+        ClientInteraction.Source.SYSTEM: "critical",
+    }.get(interaction.source, "warning")
 
 
 def _task_stats(queryset, today):
@@ -320,15 +378,18 @@ def _task_filter_context(*, request, current_url, filter_values):
     )
 
     return {
+        "selected_assigned_by": filter_values["assigned_by"],
         "selected_assigned_to": filter_values["assigned_to"],
         "selected_client_id": selected_client_id,
         "selected_order_id": filter_values["order_id"],
         "selected_status": filter_values["status"],
         "selected_deadline": filter_values["deadline"],
+        "assigned_by_options": manager_options,
         "assigned_to_options": manager_options,
         "client_options": filter_clients_queryset(request.user, Client.objects.order_by("name")),
         "order_options": order_options,
         "task_status_choices": Task.Status.choices,
+        "task_priority_choices": Task.Priority.choices,
         "deadline_options": TASK_DEADLINE_OPTIONS,
         "task_add_url": _build_url(
             "crm_task_create",
@@ -347,6 +408,7 @@ def _task_filter_context(*, request, current_url, filter_values):
             "crm_tasks_kanban",
             params={
                 "q": filter_values["search"] or None,
+                "assigned_by": filter_values["assigned_by"] or None,
                 "assigned_to": filter_values["assigned_to"] or None,
                 "client": selected_client_id or None,
                 "order": filter_values["order_id"] or None,
@@ -357,6 +419,7 @@ def _task_filter_context(*, request, current_url, filter_values):
             "crm_tasks",
             params={
                 "q": filter_values["search"] or None,
+                "assigned_by": filter_values["assigned_by"] or None,
                 "assigned_to": filter_values["assigned_to"] or None,
                 "client": selected_client_id or None,
                 "order": filter_values["order_id"] or None,
@@ -383,7 +446,14 @@ def _render_form_page(
     delete_url=None,
     full_width_fields=None,
     item_full_width_fields=None,
+    formset_eyebrow="Позиції замовлення",
+    formset_title="Позиції замовлення",
+    formset_help="Назва замовлення оновиться автоматично після збереження.",
+    formset_item_label="Позиція",
     client=None,
+    copy_panel_title="",
+    copy_panel_text="",
+    copy_panel_help="",
 ):
     context = _crm_context(request, crm_nav)
     if client is not None:
@@ -400,9 +470,16 @@ def _render_form_page(
             "object_label": object_label,
             "form": form,
             "formset": formset,
+            "formset_eyebrow": formset_eyebrow,
+            "formset_title": formset_title,
+            "formset_help": formset_help,
+            "formset_item_label": formset_item_label,
             "delete_url": delete_url,
             "full_width_fields": full_width_fields or DEFAULT_FULL_WIDTH_FIELDS,
             "item_full_width_fields": item_full_width_fields or ORDER_ITEM_FULL_WIDTH_FIELDS,
+            "copy_panel_title": copy_panel_title,
+            "copy_panel_text": copy_panel_text,
+            "copy_panel_help": copy_panel_help,
         }
     )
     return render(request, "crm/form_page.html", context)
@@ -425,7 +502,7 @@ def _render_delete_page(
         context.update(_client_workspace_context(request, client))
     context.update(
         {
-            "page_title": f"Delete {object_label}",
+            "page_title": f"Видалити {object_label.lower()}",
             "hero_title": f"Видалити {object_label.lower()}",
             "hero_text": hero_text,
             "confirm_label": confirm_label,
@@ -524,6 +601,20 @@ def client_details(request, client_id):
         .select_related("client", "contact", "order", "assigned_to", "assigned_by")
         .order_by("date", "id")
     )
+    visible_orders_queryset = filter_orders_queryset(
+        request.user,
+        Order.objects.filter(contact__client=client),
+    )
+    visible_tasks_queryset = filter_tasks_queryset(
+        request.user,
+        Task.objects.filter(client=client),
+    )
+    interactions = list(
+        client.interactions.select_related("contact", "order", "task", "created_by")
+        .filter(Q(order__isnull=True) | Q(order_id__in=visible_orders_queryset.values("id")))
+        .filter(Q(task__isnull=True) | Q(task_id__in=visible_tasks_queryset.values("id")))
+        .order_by("-event_at", "-id")[:50]
+    )
 
     can_change_contact = request.user.has_perm("crm.change_contact")
     can_delete_contact = request.user.has_perm("crm.delete_contact")
@@ -570,11 +661,19 @@ def client_details(request, client_id):
             can_change_order=can_change_order,
             today=today,
         )
+    for interaction in interactions:
+        _decorate_interaction(
+            interaction,
+            current_url=current_url,
+            can_change_task=can_change_task,
+            can_change_order=can_change_order,
+        )
 
     stats = {
         "contacts_count": len(contacts),
         "orders_count": len(orders),
         "tasks_count": len(tasks),
+        "interactions_count": client.interactions.count(),
         "open_tasks_count": sum(1 for task in tasks if task.is_open),
         "overdue_tasks_count": sum(1 for task in tasks if task.is_overdue),
         "completed_tasks_count": sum(1 for task in tasks if task.is_done),
@@ -589,11 +688,52 @@ def client_details(request, client_id):
             "contacts": contacts,
             "orders": orders,
             "tasks": tasks,
+            "interactions": interactions,
             "stats": stats,
             "today": today,
         }
     )
     return render(request, "crm/client_details.html", context)
+
+
+@roles_required(*INTERNAL_ROLES)
+def client_interaction_create(request, client_id):
+    _require_permission(request, "crm.add_clientinteraction")
+    client = get_object_or_404(
+        filter_clients_queryset(
+            request.user,
+            Client.objects.prefetch_related("contacts"),
+        ),
+        pk=client_id,
+    )
+    initial_event_at = timezone.localtime().replace(second=0, microsecond=0)
+    form = ClientInteractionForm(
+        request.POST or None,
+        user=request.user,
+        client=client,
+        initial={"event_at": initial_event_at},
+    )
+    if request.method == "POST" and form.is_valid():
+        interaction = form.save(commit=False)
+        interaction.client = client
+        interaction.source = ClientInteraction.Source.MANUAL
+        interaction.created_by = request.user
+        interaction.save()
+        return _redirect_target(request, reverse("client_details", args=[client.id]))
+    return _render_form_page(
+        request,
+        crm_nav="clients",
+        form=form,
+        page_title=f"Нова взаємодія для {client.name}",
+        hero_title="Додати запис в історію",
+        hero_text="Фіксація дзвінка, повідомлення, коментаря або службової події в єдиній хронології клієнта.",
+        submit_label="Зберегти запис",
+        cancel_url=_safe_next_url(request) or reverse("client_details", args=[client.id]),
+        mode_label="Створення",
+        object_label="Взаємодія",
+        full_width_fields=["description"],
+        client=client,
+    )
 
 
 @roles_required(*INTERNAL_ROLES)
@@ -912,13 +1052,13 @@ def client_create(request):
         request,
         crm_nav="clients",
         form=form,
-        page_title="New client",
+        page_title="Новий клієнт",
         hero_title="Створити клієнта",
-        hero_text="Нова картка клієнта створюється прямо у CRM workspace без переходу в Django Admin.",
+        hero_text="Нова картка клієнта створюється прямо у робочому інтерфейсі CRM без переходу в адмінку.",
         submit_label="Створити клієнта",
         cancel_url=_safe_next_url(request) or reverse("crm_clients"),
-        mode_label="Create",
-        object_label="Client",
+        mode_label="Створення",
+        object_label="Клієнт",
         full_width_fields=DEFAULT_FULL_WIDTH_FIELDS,
     )
 
@@ -944,8 +1084,8 @@ def client_update(request, client_id):
         hero_text="Оновлення реквізитів, контактних каналів і тегації клієнта в робочому CRM-інтерфейсі.",
         submit_label="Зберегти клієнта",
         cancel_url=_safe_next_url(request) or fallback_url,
-        mode_label="Edit",
-        object_label="Client",
+        mode_label="Редагування",
+        object_label="Клієнт",
         delete_url=_build_url("crm_client_delete", args=[client.id], next_url=_safe_next_url(request) or fallback_url)
         if request.user.has_perm("crm.delete_client")
         else None,
@@ -974,7 +1114,7 @@ def client_delete(request, client_id):
     return _render_delete_page(
         request,
         crm_nav="clients",
-        object_label="Client",
+        object_label="Клієнт",
         object_title=client.name,
         hero_text="Видалення клієнта прибере доступ до його картки. Якщо є залежні записи, система не дозволить операцію.",
         confirm_label="Видалити клієнта",
@@ -1012,14 +1152,14 @@ def contact_create(request):
         request,
         crm_nav="contacts",
         form=form,
-        page_title="New contact",
+        page_title="Новий контакт",
         hero_title="Створити контакт",
-        hero_text="Новий контакт одразу прив’язується до клієнта і з’являється у CRM workspace.",
+        hero_text="Новий контакт одразу прив’язується до клієнта і з’являється у робочому інтерфейсі CRM.",
         submit_label="Створити контакт",
         cancel_url=_safe_next_url(request)
         or (reverse("client_details", args=[selected_client.id]) if selected_client else reverse("crm_contacts")),
-        mode_label="Create",
-        object_label="Contact",
+        mode_label="Створення",
+        object_label="Контакт",
         full_width_fields=DEFAULT_FULL_WIDTH_FIELDS,
         client=sidebar_client,
     )
@@ -1043,11 +1183,11 @@ def contact_update(request, contact_id):
         form=form,
         page_title=contact.full_name,
         hero_title="Редагувати контакт",
-        hero_text="Оновлення контактної особи, посадових даних і каналів зв’язку без переходу в admin.",
+        hero_text="Оновлення контактної особи, посадових даних і каналів зв’язку без переходу в адмінку.",
         submit_label="Зберегти контакт",
         cancel_url=_safe_next_url(request) or fallback_url,
-        mode_label="Edit",
-        object_label="Contact",
+        mode_label="Редагування",
+        object_label="Контакт",
         delete_url=_build_url("crm_contact_delete", args=[contact.id], next_url=_safe_next_url(request) or fallback_url)
         if request.user.has_perm("crm.delete_contact")
         else None,
@@ -1075,7 +1215,7 @@ def contact_delete(request, contact_id):
     return _render_delete_page(
         request,
         crm_nav="contacts",
-        object_label="Contact",
+        object_label="Контакт",
         object_title=contact.full_name,
         hero_text="Видалення контакту також зачепить пов’язані задачі та замовлення, якщо для них немає захисту на рівні моделі.",
         confirm_label="Видалити контакт",
@@ -1131,17 +1271,20 @@ def order_create(request):
         request,
         crm_nav="orders",
         form=form,
-        page_title="New order",
+        page_title="Нове замовлення",
         hero_title="Створити замовлення",
-        hero_text="Замовлення створюється в CRM workspace разом із позиціями, доставкою та оплатою без переходу в admin.",
+        hero_text="Замовлення створюється у робочому інтерфейсі CRM разом із позиціями, доставкою та оплатою без переходу в адмінку.",
         submit_label="Створити замовлення",
         cancel_url=cancel_url,
-        mode_label="Create",
-        object_label="Order",
+        mode_label="Створення",
+        object_label="Замовлення",
         formset=formset,
         full_width_fields=ORDER_FULL_WIDTH_FIELDS,
         item_full_width_fields=ORDER_ITEM_FULL_WIDTH_FIELDS,
         client=sidebar_client,
+        copy_panel_title="Запит на доставку",
+        copy_panel_text=_delivery_request_text(),
+        copy_panel_help="Скопіюйте шаблон повідомлення та надішліть клієнту для збору даних доставки.",
     )
 
 
@@ -1176,13 +1319,13 @@ def order_update(request, order_id):
         request,
         crm_nav="orders",
         form=form,
-        page_title=order.title or f"Order #{order.id}",
+        page_title=order.title or f"Замовлення #{order.id}",
         hero_title="Редагувати замовлення",
         hero_text="Оновлення статусу, дедлайну, доставки, оплати і позицій замовлення в єдиній формі.",
         submit_label="Зберегти замовлення",
         cancel_url=_safe_next_url(request) or fallback_url,
-        mode_label="Edit",
-        object_label="Order",
+        mode_label="Редагування",
+        object_label="Замовлення",
         formset=formset,
         delete_url=_build_url("crm_order_delete", args=[order.id], next_url=_safe_next_url(request) or fallback_url)
         if request.user.has_perm("crm.delete_order")
@@ -1190,6 +1333,9 @@ def order_update(request, order_id):
         full_width_fields=ORDER_FULL_WIDTH_FIELDS,
         item_full_width_fields=ORDER_ITEM_FULL_WIDTH_FIELDS,
         client=order.contact.client,
+        copy_panel_title="Запит на доставку",
+        copy_panel_text=_delivery_request_text(),
+        copy_panel_help="Скопіюйте шаблон повідомлення та надішліть клієнту для збору даних доставки.",
     )
 
 
@@ -1212,8 +1358,8 @@ def order_delete(request, order_id):
     return _render_delete_page(
         request,
         crm_nav="orders",
-        object_label="Order",
-        object_title=order.title or f"Order #{order.id}",
+        object_label="Замовлення",
+        object_title=order.title or f"Замовлення #{order.id}",
         hero_text="Видалення замовлення також прибере його позиції та пов’язані каскадні записи.",
         confirm_label="Видалити замовлення",
         cancel_url=_safe_next_url(request) or fallback_url,
@@ -1293,13 +1439,13 @@ def task_create(request):
         request,
         crm_nav="tasks",
         form=form,
-        page_title="New task",
+        page_title="Нова задача",
         hero_title="Створити задачу",
         hero_text="Нова CRM-задача створюється з прив’язкою до клієнта, контакту, замовлення та відповідальних.",
         submit_label="Створити задачу",
         cancel_url=cancel_url,
-        mode_label="Create",
-        object_label="Task",
+        mode_label="Створення",
+        object_label="Задача",
         full_width_fields=DEFAULT_FULL_WIDTH_FIELDS,
         client=sidebar_client,
     )
@@ -1331,8 +1477,8 @@ def task_update(request, task_id):
         hero_text="Оновлення статусу, дедлайну, зв’язків із клієнтом, контактом, замовленням і відповідальних у CRM-формі.",
         submit_label="Зберегти задачу",
         cancel_url=_safe_next_url(request) or fallback_url,
-        mode_label="Edit",
-        object_label="Task",
+        mode_label="Редагування",
+        object_label="Задача",
         delete_url=_build_url("crm_task_delete", args=[task.id], next_url=_safe_next_url(request) or fallback_url)
         if request.user.has_perm("crm.delete_task")
         else None,
@@ -1360,9 +1506,9 @@ def task_delete(request, task_id):
     return _render_delete_page(
         request,
         crm_nav="tasks",
-        object_label="Task",
+        object_label="Задача",
         object_title=task.title,
-        hero_text="Видалення задачі прибере її з client workspace, списків і персонального акаунта.",
+        hero_text="Видалення задачі прибере її з картки клієнта, списків і персонального акаунта.",
         confirm_label="Видалити задачу",
         cancel_url=_safe_next_url(request) or fallback_url,
         delete_error=delete_error,
@@ -1373,22 +1519,33 @@ def task_delete(request, task_id):
 @roles_required(*INTERNAL_ROLES)
 def product_create(request):
     _require_permission(request, "crm.add_product")
-    form = ProductForm(request.POST or None)
-    if request.method == "POST" and form.is_valid():
-        form.save()
+    product = Product()
+    form = ProductForm(request.POST or None, instance=product)
+    formset = ProductProductionNormFormSet(request.POST or None, instance=product, prefix="norms")
+    if request.method == "POST" and form.is_valid() and formset.is_valid():
+        with transaction.atomic():
+            product = form.save()
+            formset.instance = product
+            formset.save()
         return _redirect_target(request, reverse("crm_products"))
     return _render_form_page(
         request,
         crm_nav="products",
         form=form,
-        page_title="New product",
+        formset=formset,
+        page_title="Новий продукт",
         hero_title="Створити продукт",
-        hero_text="Новий продукт додається у власний CRM-каталог з технічними даними та посиланнями.",
+        hero_text="Новий продукт додається у власний CRM-каталог з технічними даними та структурованими нормами виробництва.",
         submit_label="Створити продукт",
         cancel_url=_safe_next_url(request) or reverse("crm_products"),
-        mode_label="Create",
-        object_label="Product",
+        mode_label="Створення",
+        object_label="Продукт",
         full_width_fields=DEFAULT_FULL_WIDTH_FIELDS,
+        item_full_width_fields=["comment"],
+        formset_eyebrow="Норми виробництва",
+        formset_title="Нормативи виробництва",
+        formset_help="Норми задаються по етапах і використовуються автопланувальником.",
+        formset_item_label="Норматив",
     )
 
 
@@ -1397,25 +1554,35 @@ def product_update(request, product_id):
     _require_permission(request, "crm.change_product")
     product = get_object_or_404(Product, pk=product_id)
     form = ProductForm(request.POST or None, instance=product)
-    if request.method == "POST" and form.is_valid():
-        form.save()
+    formset = ProductProductionNormFormSet(request.POST or None, instance=product, prefix="norms")
+    if request.method == "POST" and form.is_valid() and formset.is_valid():
+        with transaction.atomic():
+            product = form.save()
+            formset.instance = product
+            formset.save()
         return _redirect_target(request, reverse("crm_products"))
     fallback_url = reverse("crm_products")
     return _render_form_page(
         request,
         crm_nav="products",
         form=form,
+        formset=formset,
         page_title=product.name,
         hero_title="Редагувати продукт",
-        hero_text="Оновлення каталожних, технічних і цінових даних продукту у CRM workspace.",
+        hero_text="Оновлення каталожних, технічних і цінових даних продукту у робочому інтерфейсі CRM, зокрема норм часу та матеріалів.",
         submit_label="Зберегти продукт",
         cancel_url=_safe_next_url(request) or fallback_url,
-        mode_label="Edit",
-        object_label="Product",
+        mode_label="Редагування",
+        object_label="Продукт",
         delete_url=_build_url("crm_product_delete", args=[product.id], next_url=_safe_next_url(request) or fallback_url)
         if request.user.has_perm("crm.delete_product")
         else None,
         full_width_fields=DEFAULT_FULL_WIDTH_FIELDS,
+        item_full_width_fields=["comment"],
+        formset_eyebrow="Норми виробництва",
+        formset_title="Нормативи виробництва",
+        formset_help="Автопланувальник використовує активні норми по відповідному етапу.",
+        formset_item_label="Норматив",
     )
 
 
@@ -1435,7 +1602,7 @@ def product_delete(request, product_id):
     return _render_delete_page(
         request,
         crm_nav="products",
-        object_label="Product",
+        object_label="Продукт",
         object_title=product.name,
         hero_text="Видалення продукту можливе лише тоді, коли він не використовується в існуючих замовленнях.",
         confirm_label="Видалити продукт",

@@ -1,7 +1,8 @@
 from django.db import models
 from django.conf import settings  # ← ДОЛЖЕН быть только этот импорт
-from manufacture.models import ProductionSlot
+from manufacture.models import ProductionStage
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 
 class Tag(models.Model):
@@ -48,7 +49,7 @@ class Client(models.Model):
     )
 
     phones = models.CharField("Телефони", max_length=255, blank=True, help_text="Кілька через кому")
-    email = models.EmailField("Email", blank=True)
+    email = models.EmailField("Електронна пошта", blank=True)
 
     # ✅ додаємо джерело і теги на рівні клієнта (дуже корисно)
     source = models.CharField(
@@ -107,7 +108,7 @@ class Contact(models.Model):
     full_name = models.CharField("ПІБ", max_length=255)
     position = models.CharField("Посада", max_length=255, blank=True)
     phone = models.CharField("Телефон", max_length=50, blank=True)
-    email = models.EmailField("Email", blank=True)
+    email = models.EmailField("Електронна пошта", blank=True)
 
     # ✅ повертаємо теги і джерело саме на контакті (як ти і хочеш)
     tags = models.ManyToManyField("Tag", related_name="contacts", blank=True)
@@ -185,6 +186,91 @@ class Product(models.Model):
     def __str__(self):
         return f"{self.name} ({self.sku})" if self.sku else self.name
 
+
+
+class ProductProductionNorm(models.Model):
+    class TimeUnit(models.TextChoices):
+        MINUTES = "minutes", "Хвилини"
+        HOURS = "hours", "Години"
+
+    class MaterialUnit(models.TextChoices):
+        PIECE = "piece", "шт"
+        SQUARE_METER = "square_meter", "м²"
+        KILOGRAM = "kilogram", "кг"
+        METER = "meter", "м"
+        LITER = "liter", "л"
+        OTHER = "other", "Інше"
+
+    product = models.ForeignKey(
+        Product,
+        related_name="production_norms",
+        on_delete=models.CASCADE,
+        verbose_name="Продукт",
+    )
+    stage_type = models.CharField(
+        "Тип етапу",
+        max_length=32,
+        choices=ProductionStage.StageType.choices,
+        db_index=True,
+    )
+    time_value = models.DecimalField(
+        "Норма часу",
+        max_digits=8,
+        decimal_places=2,
+        help_text="Тривалість етапу для однієї одиниці продукції.",
+    )
+    time_unit = models.CharField(
+        "Одиниця норми часу",
+        max_length=16,
+        choices=TimeUnit.choices,
+        default=TimeUnit.HOURS,
+    )
+    material_value = models.DecimalField(
+        "Норма матеріалу",
+        max_digits=10,
+        decimal_places=3,
+        null=True,
+        blank=True,
+    )
+    material_unit = models.CharField(
+        "Одиниця норми матеріалу",
+        max_length=24,
+        choices=MaterialUnit.choices,
+        default=MaterialUnit.PIECE,
+    )
+    version = models.CharField("Версія", max_length=50, default="v1", blank=True)
+    comment = models.CharField("Коментар", max_length=255, blank=True)
+    is_active = models.BooleanField("Активний норматив", default=True)
+    created_at = models.DateTimeField("Створено", auto_now_add=True)
+    updated_at = models.DateTimeField("Оновлено", auto_now=True)
+
+    class Meta:
+        verbose_name = "Норматив виробництва"
+        verbose_name_plural = "Нормативи виробництва"
+        ordering = ["product__name", "stage_type", "-is_active", "-updated_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product", "stage_type", "version"],
+                name="crm_unique_product_stage_norm_version",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.product} / {self.get_stage_type_display()} / {self.time_value} {self.get_time_unit_display()}"
+
+    def clean(self):
+        super().clean()
+        if self.time_value is None or self.time_value <= 0:
+            raise ValidationError({"time_value": "Норма часу має бути більшою за нуль."})
+        if self.material_value is not None and self.material_value <= 0:
+            raise ValidationError({"material_value": "Норма матеріалу має бути більшою за нуль."})
+        if self.version is not None:
+            self.version = self.version.strip() or "v1"
+
+    def get_time_minutes(self):
+        if self.time_unit == self.TimeUnit.MINUTES:
+            return float(self.time_value)
+        return float(self.time_value) * 60.0
 
 
 class OrderItem(models.Model):
@@ -351,6 +437,20 @@ class Order(models.Model):
         help_text="Напр.: 50% передоплата / оплата при отриманні / оплата 3 дні після відвантаження"
     )
 
+    @staticmethod
+    def delivery_request_template():
+        return (
+            "Будь ласка, надайте інформацію для доставки:\n"
+            "- ПІБ отримувача\n"
+            "- Номер телефону\n"
+            "- Місто\n"
+            "- Відділення або адреса доставки\n"
+            "- Перевізник\n"
+        )
+
+    def get_delivery_request_text(self):
+        return self.delivery_request_template()
+
     def build_title_from_items(self) -> str:
         # товари через кому, унікальні, у стабільному порядку
         names = list(
@@ -398,6 +498,12 @@ class Order(models.Model):
 
 
 class Task(models.Model):
+    class Priority(models.TextChoices):
+        LOW = "low", "Низький"
+        NORMAL = "normal", "Нормальний"
+        HIGH = "high", "Високий"
+        URGENT = "urgent", "Терміновий"
+
     class Status(models.TextChoices):
         NEW = "new", "Нова"
         IN_PROGRESS = "in_progress", "В роботі"
@@ -431,6 +537,8 @@ class Task(models.Model):
 
     title = models.CharField("Назва задачі", max_length=255)
 
+    description = models.TextField("Опис", blank=True)
+
     assigned_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         related_name="tasks_assigned_by",
@@ -449,7 +557,15 @@ class Task(models.Model):
         verbose_name="Кому призначена",
     )
 
-    date = models.DateField("Дата задачі", db_index=True)
+    priority = models.CharField(
+        "Пріоритет",
+        max_length=16,
+        choices=Priority.choices,
+        default=Priority.NORMAL,
+        db_index=True,
+    )
+
+    date = models.DateField("Дедлайн", db_index=True)
 
     status = models.CharField(
         "Статус",
@@ -507,3 +623,104 @@ class Task(models.Model):
         if not self.client_id and self.order_id:
             self.client = self.order.contact.client
         super().save(*args, **kwargs)
+
+
+class ClientInteraction(models.Model):
+    class EventType(models.TextChoices):
+        NOTE = "note", "Нотатка"
+        CALL = "call", "Дзвінок"
+        MESSAGE = "message", "Повідомлення"
+        COMMENT = "comment", "Коментар"
+        CONTACT = "contact", "Контакт"
+        ORDER = "order", "Замовлення"
+        TASK = "task", "Задача"
+        PRODUCTION = "production", "Виробництво"
+        SYSTEM = "system", "Службова подія"
+
+    class Source(models.TextChoices):
+        MANUAL = "manual", "Ручне внесення"
+        AUTO = "auto", "Автоматично"
+        SYSTEM = "system", "Система"
+
+    client = models.ForeignKey(
+        Client,
+        related_name="interactions",
+        on_delete=models.CASCADE,
+        verbose_name="Клієнт",
+    )
+    contact = models.ForeignKey(
+        Contact,
+        related_name="interactions",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Контакт",
+    )
+    order = models.ForeignKey(
+        Order,
+        related_name="interactions",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Замовлення",
+    )
+    task = models.ForeignKey(
+        Task,
+        related_name="interactions",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Задача",
+    )
+    event_type = models.CharField(
+        "Тип події",
+        max_length=20,
+        choices=EventType.choices,
+        default=EventType.SYSTEM,
+        db_index=True,
+    )
+    source = models.CharField(
+        "Джерело",
+        max_length=16,
+        choices=Source.choices,
+        default=Source.SYSTEM,
+        db_index=True,
+    )
+    title = models.CharField("Заголовок", max_length=255)
+    description = models.TextField("Опис", blank=True)
+    event_at = models.DateTimeField("Дата події", default=timezone.now, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="client_interactions",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Хто зафіксував",
+    )
+    payload = models.JSONField("Додаткові дані", default=dict, blank=True)
+    created_at = models.DateTimeField("Створено", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Історія взаємодії"
+        verbose_name_plural = "Історія взаємодій"
+        ordering = ["-event_at", "-id"]
+        indexes = [
+            models.Index(fields=["client", "event_at"]),
+            models.Index(fields=["event_type", "event_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.client} / {self.title}"
+
+    def clean(self):
+        super().clean()
+        if self.contact_id and self.contact.client_id != self.client_id:
+            raise ValidationError({"contact": "Контакт має належати вибраному клієнту."})
+        if self.order_id and self.order.contact.client_id != self.client_id:
+            raise ValidationError({"order": "Замовлення має належати вибраному клієнту."})
+        if self.task_id and self.task.client_id != self.client_id:
+            raise ValidationError({"task": "Задача має належати вибраному клієнту."})
+
+    @property
+    def is_manual(self):
+        return self.source == self.Source.MANUAL

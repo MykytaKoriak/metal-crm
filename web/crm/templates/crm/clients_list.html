@@ -1,7 +1,8 @@
 {% extends "crm/workspace_base.html" %}
+{% load core_display %}
 
 {% block title %}Клієнти{% endblock %}
-{% block eyebrow %}CRM clients{% endblock %}
+{% block eyebrow %}CRM · клієнти{% endblock %}
 {% block hero_title %}Клієнтська база{% endblock %}
 {% block hero_text %}Реєстр клієнтів і швидкі дії по картках.{% endblock %}
 
@@ -16,7 +17,7 @@
     </div>
     <div class="chip">
         <strong>{{ stats.b2b_clients }}</strong>
-        <span>B2B клієнти</span>
+        <span>Бізнес-клієнти</span>
     </div>
     <div class="chip">
         <strong>{{ stats.clients_with_open_tasks }}</strong>
@@ -28,7 +29,7 @@
     <section class="panel">
         <div class="toolbar">
             <form method="get" class="search-form">
-                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві, коду, телефону, email">
+                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві, коду, телефону, ел. пошті">
                 <button type="submit">Знайти</button>
             </form>
             {% if client_add_url %}
@@ -38,7 +39,7 @@
     </section>
 
     <section class="panel">
-        <span class="eyebrow">Clients</span>
+        <span class="eyebrow">Клієнти</span>
         <h2>Список клієнтів</h2>
         {% if clients %}
             <div class="card-grid">

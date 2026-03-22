@@ -1,7 +1,7 @@
 {% extends "core/dashboard_base.html" %}
 
 {% block title %}Адміністратор{% endblock %}
-{% block eyebrow %}Administrator dashboard{% endblock %}
+{% block eyebrow %}Панель адміністратора{% endblock %}
 {% block hero_title %}Операційний центр адміністратора{% endblock %}
 {% block hero_text %}Операційні показники, доступи та виробничий стан.{% endblock %}
 
@@ -50,7 +50,7 @@
 
     <section class="section-grid two-up">
         <article class="panel">
-            <span class="eyebrow">Orders</span>
+            <span class="eyebrow">Замовлення</span>
             <h2>Загальна статистика замовлень</h2>
             <div class="metrics">
                 <div class="metric">
@@ -85,7 +85,7 @@
         </article>
 
         <article class="panel">
-            <span class="eyebrow">Status mix</span>
+            <span class="eyebrow">Статуси</span>
             <h2>Розподіл по статусах</h2>
             {% for row in order_status_rows %}
                 <div class="bar-row">
@@ -101,7 +101,7 @@
 
     <section class="section-grid two-up">
         <article class="panel">
-            <span class="eyebrow">Production</span>
+            <span class="eyebrow">Виробництво</span>
             <h2>Завантаженість виробництва</h2>
             <div class="metrics">
                 <div class="metric">
@@ -124,7 +124,7 @@
         </article>
 
         <article class="panel">
-            <span class="eyebrow">Top load</span>
+            <span class="eyebrow">Найбільше навантаження</span>
             <h2>Найзавантаженіші ресурси</h2>
             {% if production.top_resources %}
                 <div class="table-wrap">

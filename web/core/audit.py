@@ -26,6 +26,8 @@ AUDITED_FIELDS = {
     ),
     Task: (
         "title",
+        "description",
+        "priority",
         "status",
         "date",
         "assigned_by_id",

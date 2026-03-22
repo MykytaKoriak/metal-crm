@@ -100,9 +100,9 @@ def update_telegram_preferences(request):
     form = TelegramPreferencesForm(request.POST, instance=profile)
     if form.is_valid():
         form.save()
-        messages.success(request, "Telegram settings updated.")
+        messages.success(request, "Налаштування Telegram оновлено.")
     else:
-        messages.error(request, "Unable to save Telegram settings.")
+        messages.error(request, "Не вдалося зберегти налаштування Telegram.")
     return redirect("my_account")
 
 
@@ -141,12 +141,12 @@ def telegram_webhook(request):
     if secret:
         received_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
         if received_secret != secret:
-            return JsonResponse({"ok": False, "error": "invalid secret"}, status=403)
+            return JsonResponse({"ok": False, "error": "некоректний секретний ключ"}, status=403)
 
     try:
         payload = json.loads(request.body.decode("utf-8"))
     except json.JSONDecodeError:
-        return HttpResponseBadRequest("Invalid JSON payload.")
+        return HttpResponseBadRequest("Некоректне JSON-повідомлення.")
 
     process_update(payload)
     return JsonResponse({"ok": True})

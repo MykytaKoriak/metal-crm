@@ -1,4 +1,5 @@
 from datetime import timedelta
+import hashlib
 
 from django.utils import timezone
 
@@ -10,12 +11,17 @@ from manufacture.services import build_orders_in_work_report
 
 from .api import TelegramAPIError, send_message
 from .formatters import (
+    build_help_message,
     build_home_keyboard,
     build_home_message,
+    build_order_comment_message,
+    build_order_created_message,
     build_order_deadline_message,
     build_order_status_message,
     build_orders_message,
+    build_profile_message,
     build_production_event_message,
+    build_task_comment_message,
     build_task_created_message,
     build_task_deadline_message,
     build_tasks_message,
@@ -25,6 +31,9 @@ from .formatters import (
 
 NOTIFICATION_PREFERENCE_MAP = {
     TelegramNotification.Type.TASK_CREATED: "telegram_notify_new_tasks",
+    TelegramNotification.Type.TASK_COMMENT: "telegram_notify_comments",
+    TelegramNotification.Type.ORDER_CREATED: "telegram_notify_new_orders",
+    TelegramNotification.Type.ORDER_COMMENT: "telegram_notify_comments",
     TelegramNotification.Type.TASK_DEADLINE: "telegram_notify_deadlines",
     TelegramNotification.Type.ORDER_DEADLINE: "telegram_notify_deadlines",
     TelegramNotification.Type.TASK_OVERDUE: "telegram_notify_overdue",
@@ -114,6 +123,14 @@ def build_home_response(profile):
     return build_home_message(profile), build_home_keyboard()
 
 
+def build_help_response(profile=None):
+    return build_help_message(profile), build_home_keyboard()
+
+
+def build_profile_response(profile):
+    return build_profile_message(profile), build_home_keyboard()
+
+
 def get_task_queryset_for_profile(profile, *, scope="open"):
     today = timezone.localdate()
     queryset = (
@@ -187,6 +204,10 @@ def enqueue_notification(
     return notification, created
 
 
+def _content_hash(value):
+    return hashlib.sha1((value or "").strip().encode("utf-8")).hexdigest()[:12]
+
+
 def queue_task_created_notification(task):
     if not task.assigned_to_id:
         return None
@@ -203,6 +224,37 @@ def queue_task_created_notification(task):
     )
 
 
+def queue_task_comment_notification(task):
+    if not task.assigned_to_id or not (task.comment or "").strip():
+        return None
+    profile = get_profile_for_user(task.assigned_to)
+    if not profile:
+        return None
+    return enqueue_notification(
+        profile=profile,
+        notification_type=TelegramNotification.Type.TASK_COMMENT,
+        message_text=build_task_comment_message(task),
+        dedupe_key=f"task-comment:{task.pk}:{task.assigned_to_id}:{_content_hash(task.comment)}",
+        task=task,
+        order=task.order,
+    )
+
+
+def queue_order_created_notification(order):
+    if not order.manager_id:
+        return None
+    profile = get_profile_for_user(order.manager)
+    if not profile:
+        return None
+    return enqueue_notification(
+        profile=profile,
+        notification_type=TelegramNotification.Type.ORDER_CREATED,
+        message_text=build_order_created_message(order),
+        dedupe_key=f"order-created:{order.pk}:{order.manager_id}",
+        order=order,
+    )
+
+
 def queue_order_status_notification(order, *, previous_status=None):
     if not order.manager_id or previous_status == order.status:
         return None
@@ -214,6 +266,21 @@ def queue_order_status_notification(order, *, previous_status=None):
         notification_type=TelegramNotification.Type.ORDER_STATUS,
         message_text=build_order_status_message(order, previous_status=previous_status),
         dedupe_key=f"order-status:{order.pk}:{previous_status}:{order.status}:{timezone.localdate().isoformat()}",
+        order=order,
+    )
+
+
+def queue_order_comment_notification(order):
+    if not order.manager_id or not (order.comment or "").strip():
+        return None
+    profile = get_profile_for_user(order.manager)
+    if not profile:
+        return None
+    return enqueue_notification(
+        profile=profile,
+        notification_type=TelegramNotification.Type.ORDER_COMMENT,
+        message_text=build_order_comment_message(order),
+        dedupe_key=f"order-comment:{order.pk}:{order.manager_id}:{_content_hash(order.comment)}",
         order=order,
     )
 
@@ -342,7 +409,7 @@ def deliver_notification(notification):
     profile = notification.profile
     if not profile_allows_notification(profile, notification.notification_type):
         notification.status = TelegramNotification.Status.SKIPPED
-        notification.error_message = "Telegram notifications are disabled or the profile is not linked."
+        notification.error_message = "Telegram-сповіщення вимкнені або профіль не прив’язаний."
         notification.delivery_attempts += 1
         notification.save(update_fields=["status", "error_message", "delivery_attempts"])
         return False

@@ -10,6 +10,13 @@ from .models import UserProfile
 
 
 ROLE_GROUP_NAMES = {
+    UserProfile.Role.ADMIN: "Роль: Адміністратор",
+    UserProfile.Role.SALES_MANAGER: "Роль: Менеджер з продажу",
+    UserProfile.Role.PRODUCTION: "Роль: Виробництво / технолог",
+    UserProfile.Role.EXECUTIVE: "Роль: Керівник",
+}
+
+LEGACY_ROLE_GROUP_NAMES = {
     UserProfile.Role.ADMIN: "Role: Administrator",
     UserProfile.Role.SALES_MANAGER: "Role: Sales manager",
     UserProfile.Role.PRODUCTION: "Role: Production / Technologist",
@@ -36,9 +43,11 @@ ADMIN_PERMISSIONS = (
     | _permission_set("crm", "client", FULL_ACCESS_ACTIONS)
     | _permission_set("crm", "contact", FULL_ACCESS_ACTIONS)
     | _permission_set("crm", "product", FULL_ACCESS_ACTIONS)
+    | _permission_set("crm", "productproductionnorm", FULL_ACCESS_ACTIONS)
     | _permission_set("crm", "orderitem", FULL_ACCESS_ACTIONS)
     | _permission_set("crm", "order", FULL_ACCESS_ACTIONS)
     | _permission_set("crm", "task", FULL_ACCESS_ACTIONS)
+    | _permission_set("crm", "clientinteraction", FULL_ACCESS_ACTIONS)
     | _permission_set("manufacture", "machine", FULL_ACCESS_ACTIONS)
     | _permission_set("manufacture", "workunit", FULL_ACCESS_ACTIONS)
     | _permission_set("manufacture", "productionstage", FULL_ACCESS_ACTIONS)
@@ -53,6 +62,8 @@ SALES_MANAGER_PERMISSIONS = (
     | _permission_set("crm", "order", FULL_ACCESS_ACTIONS)
     | _permission_set("crm", "task", FULL_ACCESS_ACTIONS)
     | _permission_set("crm", "product", READ_ONLY_ACTIONS)
+    | _permission_set("crm", "productproductionnorm", READ_ONLY_ACTIONS)
+    | _permission_set("crm", "clientinteraction", FULL_ACCESS_ACTIONS)
     | _permission_set("manufacture", "machine", READ_ONLY_ACTIONS)
     | _permission_set("manufacture", "workunit", READ_ONLY_ACTIONS)
     | _permission_set("manufacture", "productionstage", READ_ONLY_ACTIONS)
@@ -64,9 +75,11 @@ PRODUCTION_PERMISSIONS = (
     | _permission_set("crm", "client", READ_ONLY_ACTIONS)
     | _permission_set("crm", "contact", READ_ONLY_ACTIONS)
     | _permission_set("crm", "product", READ_ONLY_ACTIONS)
+    | _permission_set("crm", "productproductionnorm", READ_ONLY_ACTIONS)
     | _permission_set("crm", "orderitem", READ_ONLY_ACTIONS)
     | _permission_set("crm", "order", READ_ONLY_ACTIONS)
     | _permission_set("crm", "task", READ_ONLY_ACTIONS)
+    | _permission_set("crm", "clientinteraction", READ_ONLY_ACTIONS)
     | _permission_set("manufacture", "machine", FULL_ACCESS_ACTIONS)
     | _permission_set("manufacture", "workunit", FULL_ACCESS_ACTIONS)
     | _permission_set("manufacture", "productionstage", FULL_ACCESS_ACTIONS)
@@ -78,9 +91,11 @@ EXECUTIVE_PERMISSIONS = (
     | _permission_set("crm", "client", READ_ONLY_ACTIONS)
     | _permission_set("crm", "contact", READ_ONLY_ACTIONS)
     | _permission_set("crm", "product", READ_ONLY_ACTIONS)
+    | _permission_set("crm", "productproductionnorm", READ_ONLY_ACTIONS)
     | _permission_set("crm", "orderitem", READ_ONLY_ACTIONS)
     | _permission_set("crm", "order", READ_ONLY_ACTIONS)
     | _permission_set("crm", "task", READ_ONLY_ACTIONS)
+    | _permission_set("crm", "clientinteraction", READ_ONLY_ACTIONS)
     | _permission_set("manufacture", "machine", READ_ONLY_ACTIONS)
     | _permission_set("manufacture", "workunit", READ_ONLY_ACTIONS)
     | _permission_set("manufacture", "productionstage", READ_ONLY_ACTIONS)
@@ -127,6 +142,9 @@ def roles_required(*roles):
 
 def sync_role_groups(using=None):
     for role, group_name in ROLE_GROUP_NAMES.items():
+        legacy_name = LEGACY_ROLE_GROUP_NAMES.get(role)
+        if legacy_name and legacy_name != group_name:
+            Group.objects.using(using).filter(name=legacy_name).update(name=group_name)
         group, _ = Group.objects.using(using).get_or_create(name=group_name)
         permissions = []
         for permission_name in ROLE_PERMISSION_MATRIX[role]:
@@ -149,7 +167,7 @@ def sync_user_role_membership(user, using=None):
         return
 
     sync_role_groups(using=using)
-    role_group_names = tuple(ROLE_GROUP_NAMES.values())
+    role_group_names = tuple({*ROLE_GROUP_NAMES.values(), *LEGACY_ROLE_GROUP_NAMES.values()})
     desired_group = Group.objects.using(using).get(name=ROLE_GROUP_NAMES[role])
     preserved_group_ids = list(
         user.groups.exclude(name__in=role_group_names).values_list("id", flat=True)

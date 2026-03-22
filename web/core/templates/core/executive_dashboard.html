@@ -1,7 +1,8 @@
 {% extends "core/dashboard_base.html" %}
+{% load core_display %}
 
 {% block title %}Керівник{% endblock %}
-{% block eyebrow %}Executive dashboard{% endblock %}
+{% block eyebrow %}Панель керівника{% endblock %}
 {% block hero_title %}Управлінська аналітика{% endblock %}
 {% block hero_text %}Проблемні зони по замовленнях, виробництву, задачах та статусній воронці в одному огляді.{% endblock %}
 
@@ -31,7 +32,7 @@
 {% block content %}
     <section class="section-grid three-up">
         <article class="panel">
-            <span class="eyebrow">Orders</span>
+            <span class="eyebrow">Замовлення</span>
             <h2>Замовлення</h2>
             <div class="metrics">
                 <div class="metric"><strong>{{ executive_summary.open_orders_count }}</strong><span>Незавершені</span></div>
@@ -43,7 +44,7 @@
             </div>
         </article>
         <article class="panel">
-            <span class="eyebrow">Clients</span>
+            <span class="eyebrow">Клієнти</span>
             <h2>Клієнтський потік</h2>
             <div class="metrics">
                 <div class="metric"><strong>{{ new_clients_count }}</strong><span>Нові клієнти / 30 днів</span></div>
@@ -52,11 +53,11 @@
             </div>
         </article>
         <article class="panel">
-            <span class="eyebrow">Problems</span>
+            <span class="eyebrow">Проблеми</span>
             <h2>Проблемні зони</h2>
             <div class="metrics">
                 <div class="metric"><strong>{{ executive_summary.at_risk_order_count }}</strong><span>Ризикові замовлення</span></div>
-                <div class="metric"><strong>{{ executive_summary.overdue_stage_count }}</strong><span>Просрочені етапи</span></div>
+                <div class="metric"><strong>{{ executive_summary.overdue_stage_count }}</strong><span>Прострочені етапи</span></div>
                 <div class="metric"><strong>{{ executive_summary.stalled_task_count }}</strong><span>Завислі задачі</span></div>
             </div>
         </article>
@@ -66,7 +67,7 @@
         <article class="panel">
             <div class="panel-head">
                 <div>
-                    <span class="eyebrow">At risk</span>
+                    <span class="eyebrow">З ризиком</span>
                     <h2>Замовлення з ризиком зриву</h2>
                 </div>
                 <a class="button-link" href="{% url 'production_orders_in_work_report' %}?risk_only=1">Повний список</a>
@@ -113,8 +114,8 @@
         <article class="panel">
             <div class="panel-head">
                 <div>
-                    <span class="eyebrow">Overdue stages</span>
-                    <h2>Просрочені етапи</h2>
+                    <span class="eyebrow">Прострочені етапи</span>
+                    <h2>Прострочені етапи</h2>
                 </div>
                 <a class="button-link" href="{% url 'production_overdue_stage_report' %}">Повний звіт</a>
             </div>
@@ -126,7 +127,7 @@
                             <th>Етап</th>
                             <th>Ресурс</th>
                             <th>Планове завершення</th>
-                            <th>Просрочка</th>
+                            <th>Прострочення</th>
                         </tr>
                         </thead>
                         <tbody>
@@ -145,7 +146,7 @@
                     </table>
                 </div>
             {% else %}
-                <p class="empty">Просрочених етапів немає.</p>
+                <p class="empty">Прострочених етапів немає.</p>
             {% endif %}
         </article>
     </section>
@@ -154,10 +155,10 @@
         <article class="panel">
             <div class="panel-head">
                 <div>
-                    <span class="eyebrow">Resources</span>
+                    <span class="eyebrow">Ресурси</span>
                     <h2>Перегружені ресурси</h2>
                 </div>
-                <a class="button-link" href="{% url 'machine_load_report' %}">Перейти до перегрузу</a>
+                <a class="button-link" href="{% url 'machine_load_report' %}">Перейти до перевантаження</a>
             </div>
             {% if critical_resources %}
                 <div class="table-wrap">
@@ -192,7 +193,7 @@
         <article class="panel">
             <div class="panel-head">
                 <div>
-                    <span class="eyebrow">Tasks</span>
+                    <span class="eyebrow">Задачі</span>
                     <h2>Завислі задачі</h2>
                 </div>
             </div>
@@ -216,7 +217,7 @@
                                 </td>
                                 <td>{{ task.get_status_display }}</td>
                                 <td>{{ task.date|date:"d.m.Y" }}</td>
-                                <td>{% if task.assigned_to %}{{ task.assigned_to.email|default:task.assigned_to.username }}{% else %}—{% endif %}</td>
+                                <td>{% if task.assigned_to %}{{ task.assigned_to|user_display }}{% else %}—{% endif %}</td>
                             </tr>
                         {% endfor %}
                         </tbody>
@@ -230,7 +231,7 @@
 
     <section class="section-grid two-up">
         <article class="panel">
-            <span class="eyebrow">Conversion</span>
+            <span class="eyebrow">Конверсія</span>
             <h2>Конверсія по статусах замовлень</h2>
             {% for row in order_status_rows %}
                 <div class="bar-row">
@@ -244,7 +245,7 @@
         </article>
 
         <article class="panel">
-            <span class="eyebrow">Revenue</span>
+            <span class="eyebrow">Виручка</span>
             <h2>Виручка по місяцях</h2>
             {% for row in monthly_revenue %}
                 <div class="bar-row">
@@ -260,7 +261,7 @@
 
     <section class="section-grid two-up">
         <article class="panel">
-            <span class="eyebrow">Clients</span>
+            <span class="eyebrow">Клієнти</span>
             <h2>Нові клієнти</h2>
             {% if recent_clients %}
                 <div class="mini-list">
@@ -279,7 +280,7 @@
         </article>
 
         <article class="panel">
-            <span class="eyebrow">Recent orders</span>
+            <span class="eyebrow">Останні замовлення</span>
             <h2>Останні замовлення</h2>
             {% if recent_orders %}
                 <div class="mini-list">
@@ -288,7 +289,7 @@
                             <h3>{{ order.title|default:"Без назви" }}</h3>
                             <p class="muted">{{ order.created_at|date:"d.m.Y H:i" }}</p>
                             <p>{{ order.contact.full_name }}{% if order.contact.client %} / {{ order.contact.client.name }}{% endif %}</p>
-                            <p class="muted">{{ order.get_status_display }}{% if order.manager %} · {{ order.manager.email|default:order.manager.username }}{% endif %}</p>
+                            <p class="muted">{{ order.get_status_display }}{% if order.manager %} · {{ order.manager|user_display }}{% endif %}</p>
                         </article>
                     {% endfor %}
                 </div>

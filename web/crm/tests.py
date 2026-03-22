@@ -11,7 +11,7 @@ from core.models import ChangeAuditLog, TelegramNotification
 from core.models import UserProfile
 from manufacture.models import Machine, ProductionStage, WorkUnit
 
-from .models import Client, Contact, Order, OrderItem, Product, Tag, Task
+from .models import Client, ClientInteraction, Contact, Order, OrderItem, Product, ProductProductionNorm, Tag, Task
 
 
 class CrmWorkspaceMixin:
@@ -96,6 +96,43 @@ class CrmWorkspaceMixin:
             )
         return payload
 
+    def build_product_payload(self, *, name, sku, norm_stage, norm_time_value, norm_version="v1", product=None, norm=None):
+        payload = {
+            "name": name,
+            "sku": sku,
+            "description": "Product description",
+            "technical_description": "Technical description",
+            "base_price": "99.99",
+            "prom_url": "",
+            "rozetka_url": "",
+            "olx_url": "",
+            "site_url": "",
+            "photos_url": "",
+            "production_norms_url": "",
+            "is_active": "on",
+            "norms-TOTAL_FORMS": "1",
+            "norms-INITIAL_FORMS": "0",
+            "norms-MIN_NUM_FORMS": "0",
+            "norms-MAX_NUM_FORMS": "1000",
+            "norms-0-stage_type": norm_stage,
+            "norms-0-time_value": norm_time_value,
+            "norms-0-time_unit": ProductProductionNorm.TimeUnit.HOURS,
+            "norms-0-material_value": "1.250",
+            "norms-0-material_unit": ProductProductionNorm.MaterialUnit.SQUARE_METER,
+            "norms-0-version": norm_version,
+            "norms-0-comment": "Norm comment",
+            "norms-0-is_active": "on",
+        }
+        if product is not None and norm is not None:
+            payload.update(
+                {
+                    "norms-INITIAL_FORMS": "1",
+                    "norms-0-id": str(norm.id),
+                    "norms-0-product": str(product.id),
+                }
+            )
+        return payload
+
 
 class TestClientWorkspaceView(CrmWorkspaceMixin, TestCase):
     def setUp(self):
@@ -159,10 +196,51 @@ class TestClientWorkspaceView(CrmWorkspaceMixin, TestCase):
         self.assertContains(response, reverse("crm_contact_create"))
         self.assertContains(response, reverse("crm_order_create"))
         self.assertContains(response, reverse("crm_task_create"))
+        self.assertContains(response, reverse("crm_client_interaction_create", args=[self.client_obj.id]))
+        self.assertContains(response, "Запит доставки")
+        self.assertContains(response, "Історія взаємодії")
         self.assertEqual(response.context["stats"]["contacts_count"], 1)
         self.assertEqual(response.context["stats"]["orders_count"], 1)
         self.assertEqual(response.context["stats"]["tasks_count"], 1)
         self.assertEqual(response.context["stats"]["overdue_tasks_count"], 1)
+        self.assertGreaterEqual(response.context["stats"]["interactions_count"], 3)
+
+    def test_manual_client_interaction_can_be_created_from_workspace(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("crm_client_interaction_create", args=[self.client_obj.id]),
+            {
+                "event_type": ClientInteraction.EventType.CALL,
+                "title": "Follow-up call",
+                "description": "Discussed delivery timing",
+                "event_at": timezone.localtime().replace(second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M"),
+                "contact": str(self.contact.id),
+                "order": str(self.order.id),
+                "task": str(self.task.id),
+            },
+        )
+
+        self.assertRedirects(response, reverse("client_details", args=[self.client_obj.id]))
+        interaction = ClientInteraction.objects.get(title="Follow-up call")
+        self.assertEqual(interaction.client, self.client_obj)
+        self.assertEqual(interaction.source, ClientInteraction.Source.MANUAL)
+        self.assertEqual(interaction.created_by, self.user)
+
+    def test_production_stage_updates_are_written_to_client_timeline(self):
+        stage = self.order.items.first().production_stages.get(stage_type=ProductionStage.StageType.EXECUTION)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            stage.status = ProductionStage.Status.IN_PROGRESS
+            stage.comment = "Started on production floor"
+            stage.save(update_fields=["status", "comment", "updated_at"])
+
+        self.assertTrue(
+            ClientInteraction.objects.filter(
+                client=self.client_obj,
+                event_type=ClientInteraction.EventType.PRODUCTION,
+                title__contains=stage.get_stage_type_display(),
+            ).exists()
+        )
 
     def test_read_only_role_can_view_but_not_get_quick_create_actions(self):
         self.client.force_login(self.read_only_user)
@@ -321,43 +399,33 @@ class TestCrmCrudViews(CrmWorkspaceMixin, TestCase):
         self.client.force_login(self.admin_user)
         create_response = self.client.post(
             reverse("crm_product_create"),
-            {
-                "name": "Workspace Product",
-                "sku": "WORKSPACE-001",
-                "description": "Product description",
-                "technical_description": "Technical description",
-                "base_price": "99.99",
-                "prom_url": "",
-                "rozetka_url": "",
-                "olx_url": "",
-                "site_url": "",
-                "photos_url": "",
-                "production_norms_url": "",
-                "is_active": "on",
-            },
+            self.build_product_payload(
+                name="Workspace Product",
+                sku="WORKSPACE-001",
+                norm_stage=ProductionStage.StageType.EXECUTION,
+                norm_time_value="1.50",
+            ),
         )
         product = Product.objects.get(sku="WORKSPACE-001")
+        norm = product.production_norms.get()
         self.assertRedirects(create_response, reverse("crm_products"))
+        self.assertEqual(str(norm.time_value), "1.50")
 
         update_response = self.client.post(
             reverse("crm_product_update", args=[product.id]),
-            {
-                "name": "Workspace Product Updated",
-                "sku": "WORKSPACE-001",
-                "description": "Updated description",
-                "technical_description": "Updated technical description",
-                "base_price": "149.99",
-                "prom_url": "",
-                "rozetka_url": "",
-                "olx_url": "",
-                "site_url": "",
-                "photos_url": "",
-                "production_norms_url": "",
-                "is_active": "on",
-            },
+            self.build_product_payload(
+                name="Workspace Product Updated",
+                sku="WORKSPACE-001",
+                norm_stage=norm.stage_type,
+                norm_time_value="2.25",
+                product=product,
+                norm=norm,
+            ),
         )
         product.refresh_from_db()
+        norm.refresh_from_db()
         self.assertEqual(product.name, "Workspace Product Updated")
+        self.assertEqual(str(norm.time_value), "2.25")
         self.assertRedirects(update_response, reverse("crm_products"))
 
         delete_response = self.client.post(reverse("crm_product_delete", args=[product.id]))
@@ -371,6 +439,8 @@ class TestCrmCrudViews(CrmWorkspaceMixin, TestCase):
                 "client": str(self.base_client.id),
                 "contact": str(self.base_contact.id),
                 "title": "Workspace Task",
+                "description": "Task description",
+                "priority": Task.Priority.HIGH,
                 "status": Task.Status.NEW,
                 "assigned_by": str(self.user.id),
                 "assigned_to": str(self.user.id),
@@ -387,6 +457,8 @@ class TestCrmCrudViews(CrmWorkspaceMixin, TestCase):
                 "client": str(self.base_client.id),
                 "contact": str(self.base_contact.id),
                 "title": "Workspace Task Updated",
+                "description": "Updated task description",
+                "priority": Task.Priority.URGENT,
                 "status": Task.Status.DONE,
                 "assigned_by": str(self.user.id),
                 "assigned_to": str(self.user.id),
@@ -396,6 +468,8 @@ class TestCrmCrudViews(CrmWorkspaceMixin, TestCase):
         )
         task.refresh_from_db()
         self.assertEqual(task.title, "Workspace Task Updated")
+        self.assertEqual(task.description, "Updated task description")
+        self.assertEqual(task.priority, Task.Priority.URGENT)
         self.assertEqual(task.status, Task.Status.DONE)
         self.assertRedirects(update_response, reverse("client_details", args=[self.base_client.id]))
 
@@ -417,7 +491,7 @@ class TestCrmCrudViews(CrmWorkspaceMixin, TestCase):
 
         kanban_response = self.client.get(reverse("crm_tasks_kanban"), {"assigned_to": "mine"})
         self.assertEqual(kanban_response.status_code, 200)
-        self.assertContains(kanban_response, "Kanban-дошка задач")
+        self.assertContains(kanban_response, "Канбан-дошка задач")
         self.assertContains(kanban_response, "Kanban Task")
 
         update_response = self.client.post(
@@ -430,6 +504,38 @@ class TestCrmCrudViews(CrmWorkspaceMixin, TestCase):
         self.assertEqual(update_response.json()["status"], Task.Status.WAITING)
         self.assertEqual(task.status, Task.Status.WAITING)
         self.assertEqual(task.contact, order.contact)
+
+    def test_task_filters_support_assigned_by_mine_for_list_and_kanban(self):
+        other_user = self.create_user_with_role("filters-other@example.com", UserProfile.Role.SALES_MANAGER)
+        Task.objects.create(
+            client=self.base_client,
+            contact=self.base_contact,
+            title="Created by me",
+            assigned_by=self.user,
+            assigned_to=self.user,
+            date=timezone.localdate(),
+            status=Task.Status.NEW,
+        )
+        Task.objects.create(
+            client=self.base_client,
+            contact=self.base_contact,
+            title="Assigned to me by other user",
+            assigned_by=other_user,
+            assigned_to=self.user,
+            date=timezone.localdate(),
+            status=Task.Status.NEW,
+        )
+
+        list_response = self.client.get(reverse("crm_tasks"), {"assigned_by": "mine"})
+        self.assertEqual(list_response.status_code, 200)
+        self.assertContains(list_response, "Created by me")
+        self.assertNotContains(list_response, "Assigned to me by other user")
+        self.assertContains(list_response, "Призначені мною")
+
+        kanban_response = self.client.get(reverse("crm_tasks_kanban"), {"assigned_by": "mine"})
+        self.assertEqual(kanban_response.status_code, 200)
+        self.assertContains(kanban_response, "Created by me")
+        self.assertNotContains(kanban_response, "Assigned to me by other user")
 
     def test_order_crud_flow_with_items(self):
         product = self.create_product(name_prefix="Order Product")
@@ -562,9 +668,19 @@ class TestOrderModuleBehavior(CrmWorkspaceMixin, TestCase):
         self.assertContains(response, "Visible Receiver")
         self.assertContains(response, "TTN-VISIBLE")
         self.assertContains(response, "100% prepaid")
+        self.assertContains(response, "Запит доставки")
         self.assertContains(response, reverse("crm_order_update", args=[visible_order.id]))
         self.assertNotContains(response, reverse("crm_order_update", args=[other_order.id]))
         self.assertEqual(response.context["stats"]["total_orders"], 1)
+
+    def test_order_update_page_shows_delivery_copy_block(self):
+        order = self.create_order(self.contact, manager=self.user)
+
+        response = self.client.get(reverse("crm_order_update", args=[order.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Запит на доставку")
+        self.assertContains(response, "Скопіювати в буфер")
 
 
 class TestRowLevelVisibility(CrmWorkspaceMixin, TestCase):

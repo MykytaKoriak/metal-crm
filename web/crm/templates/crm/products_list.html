@@ -1,7 +1,8 @@
 {% extends "crm/workspace_base.html" %}
+{% load core_display %}
 
 {% block title %}Продукти{% endblock %}
-{% block eyebrow %}CRM products{% endblock %}
+{% block eyebrow %}CRM · продукти{% endblock %}
 {% block hero_title %}Каталог продуктів{% endblock %}
 {% block hero_text %}Каталог продуктів і базові дії по довіднику.{% endblock %}
 
@@ -28,7 +29,7 @@
     <section class="panel">
         <div class="toolbar">
             <form method="get" class="search-form">
-                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві, SKU, опису">
+                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві, артикулу, опису">
                 <button type="submit">Знайти</button>
             </form>
             {% if product_add_url %}
@@ -38,14 +39,14 @@
     </section>
 
     <section class="panel">
-        <span class="eyebrow">Products</span>
+        <span class="eyebrow">Продукти</span>
         <h2>Список продуктів</h2>
         {% if products %}
             <div class="card-grid">
                 {% for product in products %}
                     <article class="item-card">
                         <h3>{% if product.edit_url %}<a href="{{ product.edit_url }}">{{ product.name }}</a>{% else %}{{ product.name }}{% endif %}</h3>
-                        <p class="meta-line">{% if product.sku %}{{ product.sku }}{% else %}Без SKU{% endif %}</p>
+                        <p class="meta-line">{% if product.sku %}{{ product.sku }}{% else %}Без артикулу{% endif %}</p>
                         <p>Базова ціна: {% if product.base_price %}{{ product.base_price|floatformat:2 }}{% else %}—{% endif %}</p>
                         <p class="meta-line">В позиціях замовлень: {{ product.order_items_count }}</p>
                         <p class="meta-line">{% if product.is_active %}Активний{% else %}Неактивний{% endif %}</p>

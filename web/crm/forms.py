@@ -4,9 +4,18 @@ from django.forms import BaseInlineFormSet, inlineformset_factory
 
 from core.access import get_user_role
 from core.models import UserProfile
-from core.visibility import filter_clients_queryset, filter_contacts_queryset, filter_orders_queryset
+from core.visibility import filter_clients_queryset, filter_contacts_queryset, filter_orders_queryset, filter_tasks_queryset
 
-from .models import Client, Contact, Order, OrderItem, Product, Task
+from .models import (
+    Client,
+    ClientInteraction,
+    Contact,
+    Order,
+    OrderItem,
+    Product,
+    ProductProductionNorm,
+    Task,
+)
 
 
 class StyledModelForm(forms.ModelForm):
@@ -63,6 +72,25 @@ class ProductForm(StyledModelForm):
         }
 
 
+class ProductProductionNormForm(StyledModelForm):
+    class Meta:
+        model = ProductProductionNorm
+        fields = [
+            "stage_type",
+            "time_value",
+            "time_unit",
+            "material_value",
+            "material_unit",
+            "version",
+            "comment",
+            "is_active",
+        ]
+        widgets = {
+            "time_value": forms.NumberInput(attrs={"step": "0.01", "min": "0.01"}),
+            "material_value": forms.NumberInput(attrs={"step": "0.001", "min": "0.001"}),
+        }
+
+
 class TaskForm(StyledModelForm):
     def __init__(self, *args, **kwargs):
         self.user = kwargs.pop("user", None)
@@ -72,6 +100,8 @@ class TaskForm(StyledModelForm):
         self.fields["client"].queryset = filter_clients_queryset(self.user, Client.objects.order_by("name"))
         self.fields["assigned_by"].queryset = active_users
         self.fields["assigned_to"].queryset = active_users
+        self.fields["priority"].required = False
+        self.initial.setdefault("priority", Task.Priority.NORMAL)
 
         selected_client_id = None
         if self.is_bound:
@@ -96,10 +126,91 @@ class TaskForm(StyledModelForm):
 
     class Meta:
         model = Task
-        fields = ["client", "contact", "order", "title", "status", "assigned_by", "assigned_to", "date", "comment"]
+        fields = [
+            "client",
+            "contact",
+            "order",
+            "title",
+            "description",
+            "priority",
+            "status",
+            "assigned_by",
+            "assigned_to",
+            "date",
+            "comment",
+        ]
         widgets = {
             "date": forms.DateInput(attrs={"type": "date"}),
         }
+
+    def clean_priority(self):
+        return self.cleaned_data.get("priority") or Task.Priority.NORMAL
+
+
+class ClientInteractionForm(StyledModelForm):
+    MANUAL_EVENT_TYPES = (
+        ClientInteraction.EventType.NOTE,
+        ClientInteraction.EventType.CALL,
+        ClientInteraction.EventType.MESSAGE,
+        ClientInteraction.EventType.COMMENT,
+        ClientInteraction.EventType.SYSTEM,
+    )
+
+    def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop("user", None)
+        self.client_instance = kwargs.pop("client", None)
+        super().__init__(*args, **kwargs)
+        if self.client_instance is not None:
+            self.instance.client = self.client_instance
+        self.fields["event_type"].choices = [
+            choice
+            for choice in ClientInteraction.EventType.choices
+            if choice[0] in self.MANUAL_EVENT_TYPES
+        ]
+        self.fields["event_at"].widget = forms.DateTimeInput(
+            attrs={"type": "datetime-local"},
+            format="%Y-%m-%dT%H:%M",
+        )
+        self.fields["event_at"].input_formats = ("%Y-%m-%dT%H:%M",)
+
+        contacts = filter_contacts_queryset(self.user, Contact.objects.select_related("client"))
+        orders = filter_orders_queryset(self.user, Order.objects.select_related("contact", "contact__client"))
+        if self.client_instance is not None:
+            contacts = contacts.filter(client=self.client_instance)
+            orders = orders.filter(contact__client=self.client_instance)
+            self.initial.setdefault("contact", self.client_instance.contacts.order_by("full_name").first())
+
+        self.fields["contact"].queryset = contacts.order_by("full_name")
+        self.fields["order"].queryset = orders.order_by("-created_at", "-id")
+        self.fields["task"].queryset = Task.objects.none()
+
+        task_queryset = filter_tasks_queryset(
+            self.user,
+            Task.objects.select_related("client", "contact", "order"),
+        )
+        if self.client_instance is not None:
+            task_queryset = task_queryset.filter(client=self.client_instance)
+        self.fields["task"].queryset = task_queryset.order_by("date", "id")
+
+    class Meta:
+        model = ClientInteraction
+        fields = ["event_type", "title", "description", "event_at", "contact", "order", "task"]
+
+    def clean(self):
+        cleaned_data = super().clean()
+        contact = cleaned_data.get("contact")
+        order = cleaned_data.get("order")
+        task = cleaned_data.get("task")
+        client = self.client_instance
+        if client is None:
+            return cleaned_data
+        if contact and contact.client_id != client.id:
+            self.add_error("contact", "Контакт має належати поточному клієнту.")
+        if order and order.contact.client_id != client.id:
+            self.add_error("order", "Замовлення має належати поточному клієнту.")
+        if task and task.client_id != client.id:
+            self.add_error("task", "Задача має належати поточному клієнту.")
+        return cleaned_data
 
 
 class OrderForm(StyledModelForm):
@@ -185,5 +296,14 @@ OrderItemFormSet = inlineformset_factory(
     form=OrderItemForm,
     formset=RequiredOrderItemFormSet,
     extra=3,
+    can_delete=True,
+)
+
+
+ProductProductionNormFormSet = inlineformset_factory(
+    Product,
+    ProductProductionNorm,
+    form=ProductProductionNormForm,
+    extra=5,
     can_delete=True,
 )

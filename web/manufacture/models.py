@@ -223,9 +223,9 @@ class ProductionSlot(models.Model):
     class PlanningSource(models.TextChoices):
         PLANNER = "planner", "Автопланувальник"
         DISPATCHER = "dispatcher", "Диспетчер"
-        ADMIN = "admin", "Admin"
+        ADMIN = "admin", "Адміністратор"
         SYSTEM = "system", "Система"
-        SEED = "seed", "Demo seed"
+        SEED = "seed", "Демо-наповнення"
 
     order = models.ForeignKey(
         "crm.Order",

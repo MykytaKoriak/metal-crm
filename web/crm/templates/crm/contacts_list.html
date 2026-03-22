@@ -1,7 +1,8 @@
 {% extends "crm/workspace_base.html" %}
+{% load core_display %}
 
 {% block title %}Контакти{% endblock %}
-{% block eyebrow %}CRM contacts{% endblock %}
+{% block eyebrow %}CRM · контакти{% endblock %}
 {% block hero_title %}Контактні особи{% endblock %}
 {% block hero_text %}Контактна база з фільтрами та переходом у клієнта.{% endblock %}
 
@@ -12,7 +13,7 @@
     </div>
     <div class="chip">
         <strong>{{ stats.with_email }}</strong>
-        <span>З email</span>
+        <span>З електронною поштою</span>
     </div>
     <div class="chip">
         <strong>{{ stats.with_phone }}</strong>
@@ -28,7 +29,7 @@
     <section class="panel">
         <div class="toolbar">
             <form method="get" class="search-form">
-                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по ПІБ, посаді, телефону, email, клієнту">
+                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по ПІБ, посаді, телефону, ел. пошті, клієнту">
                 <button type="submit">Знайти</button>
             </form>
             {% if contact_add_url %}
@@ -38,7 +39,7 @@
     </section>
 
     <section class="panel">
-        <span class="eyebrow">Contacts</span>
+        <span class="eyebrow">Контакти</span>
         <h2>Список контактів</h2>
         {% if contacts %}
             <div class="table-wrap">
@@ -49,7 +50,7 @@
                         <th>Клієнт</th>
                         <th>Посада</th>
                         <th>Телефон</th>
-                        <th>Email</th>
+                        <th>Електронна пошта</th>
                         <th>Активність</th>
                         <th>Дії</th>
                     </tr>

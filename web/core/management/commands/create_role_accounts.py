@@ -9,25 +9,25 @@ ROLE_ACCOUNT_SPECS = (
     {
         "role": UserProfile.Role.ADMIN,
         "email": "admin@mkcrm.local",
-        "full_name": "System Administrator",
+        "full_name": "Системний адміністратор",
         "phone": "+380000000001",
     },
     {
         "role": UserProfile.Role.SALES_MANAGER,
         "email": "sales.manager@mkcrm.local",
-        "full_name": "Sales Manager",
+        "full_name": "Менеджер з продажу",
         "phone": "+380000000002",
     },
     {
         "role": UserProfile.Role.PRODUCTION,
         "email": "production@mkcrm.local",
-        "full_name": "Production Technologist",
+        "full_name": "Технолог виробництва",
         "phone": "+380000000003",
     },
     {
         "role": UserProfile.Role.EXECUTIVE,
         "email": "executive@mkcrm.local",
-        "full_name": "Executive Manager",
+        "full_name": "Керівник",
         "phone": "+380000000004",
     },
 )

@@ -1,7 +1,7 @@
 {% extends "crm/workspace_base.html" %}
 
 {% block title %}{{ page_title }}{% endblock %}
-{% block eyebrow %}CRM delete{% endblock %}
+{% block eyebrow %}Видалення в CRM{% endblock %}
 {% block hero_title %}{{ hero_title }}{% endblock %}
 {% block hero_text %}{{ hero_text }}{% endblock %}
 
@@ -62,20 +62,20 @@
 {% block hero_stats %}
     <div class="chip">
         <strong>{{ object_label }}</strong>
-        <span>Entity</span>
+        <span>Сутність</span>
     </div>
     <div class="chip">
-        <strong>Delete</strong>
-        <span>Action</span>
+        <strong>Видалення</strong>
+        <span>Дія</span>
     </div>
 {% endblock %}
 
 {% block content %}
     <section class="panel">
         <div class="danger-box">
-            <span class="eyebrow">Delete confirmation</span>
+            <span class="eyebrow">Підтвердження видалення</span>
             <h2>{{ object_title }}</h2>
-            <p class="danger-copy">Ця дія незворотна. Перед видаленням перевірте, що запис більше не потрібен в CRM-процесі.</p>
+            <p class="danger-copy">Ця дія незворотна. Перед видаленням перевірте, що запис більше не потрібен у процесі системи.</p>
 
             {% if delete_error %}
                 <p class="danger-error">{{ delete_error }}</p>

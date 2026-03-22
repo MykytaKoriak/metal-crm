@@ -1,7 +1,7 @@
 {% extends "core/dashboard_base.html" %}
 
 {% block title %}Вільні слоти{% endblock %}
-{% block eyebrow %}Production report{% endblock %}
+{% block eyebrow %}Звіт виробництва{% endblock %}
 {% block hero_title %}Звіт по вільних слотах{% endblock %}
 {% block hero_text %}Вільні робочі вікна по ресурсах для ручної дозагрузки виробництва.{% endblock %}
 
@@ -90,14 +90,14 @@
                 </select>
             </div>
             <button type="submit">Оновити</button>
-            <a class="button-link" href="{% url 'production_dashboard' %}">До workspace</a>
+                <a class="button-link" href="{% url 'production_dashboard' %}">До робочого місця</a>
         </form>
     </section>
 
     <section class="panel">
         <div class="panel-head">
             <div>
-                <span class="eyebrow">Free windows</span>
+                <span class="eyebrow">Вільні вікна</span>
                 <h2>Вільні вікна з {{ report.start_date|date:"d.m.Y" }} по {{ report.end_date|date:"d.m.Y" }}</h2>
             </div>
         </div>

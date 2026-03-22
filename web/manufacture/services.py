@@ -583,32 +583,32 @@ def build_order_row(order, *, now=None, today=None):
 
     if deadline and deadline < today:
         risk_level = "critical"
-        risk_reasons.append("Дедлайн уже просрочен")
+        risk_reasons.append("Дедлайн уже прострочений")
 
     if overdue_stage_count:
         risk_level = "critical"
-        risk_reasons.append(f"Просрочено этапов: {overdue_stage_count}")
+        risk_reasons.append(f"Прострочених етапів: {overdue_stage_count}")
 
     if planned_completion and deadline and planned_completion.date() > deadline and risk_level != "critical":
         risk_level = "warning"
-        risk_reasons.append("Плановое завершение позже дедлайна")
+        risk_reasons.append("Планове завершення пізніше дедлайну")
 
     if blocked_stage_count and risk_level == "healthy":
         risk_level = "warning"
-        risk_reasons.append("Есть заблокированный этап")
+        risk_reasons.append("Є заблокований етап")
 
     if deadline and days_to_deadline is not None and days_to_deadline <= 2 and progress_percent < 100:
         if risk_level == "healthy":
             risk_level = "warning"
-        risk_reasons.append("Близкий дедлайн")
+        risk_reasons.append("Близький дедлайн")
 
     if deadline and days_to_deadline is not None and days_to_deadline <= 5 and unplanned_stage_count:
         if risk_level == "healthy":
             risk_level = "warning"
-        risk_reasons.append("Есть незапланированные этапы перед дедлайном")
+        risk_reasons.append("Є незаплановані етапи перед дедлайном")
 
     if not risk_reasons:
-        risk_reasons.append("Риск не выявлен")
+        risk_reasons.append("Ризик не виявлено")
 
     risk_label = {
         "healthy": "Норма",
@@ -622,7 +622,7 @@ def build_order_row(order, *, now=None, today=None):
         "current_stage_row": current_stage_row,
         "current_stage": current_stage_row["stage"] if current_stage_row else None,
         "current_stage_label": (
-            current_stage_row["stage"].get_stage_type_display() if current_stage_row else "Без активного этапа"
+            current_stage_row["stage"].get_stage_type_display() if current_stage_row else "Без активного етапу"
         ),
         "current_resource_label": current_stage_row["resource_label"] if current_stage_row else "",
         "current_responsible": (
@@ -844,6 +844,21 @@ def validate_production_slot(slot):
 
 def estimate_stage_duration(stage):
     quantity = max(stage.order_item.quantity or 1, 1)
+    from crm.models import ProductProductionNorm
+
+    norm = (
+        ProductProductionNorm.objects.filter(
+            product=stage.order_item.product,
+            stage_type=stage.stage_type,
+            is_active=True,
+        )
+        .order_by("-updated_at", "-id")
+        .first()
+    )
+    if norm:
+        total_minutes = max(int(round(norm.get_time_minutes() * quantity)), 1)
+        return timedelta(minutes=total_minutes)
+
     base_hours = {
         ProductionStage.StageType.INTAKE: 1.0,
         ProductionStage.StageType.PROCUREMENT: 1.5,

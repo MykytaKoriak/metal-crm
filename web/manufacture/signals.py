@@ -2,6 +2,8 @@ from django.db.models.signals import post_delete, post_save, pre_delete, pre_sav
 from django.dispatch import receiver
 
 from core.request_context import get_current_user
+from crm.deletion_state import is_order_deleting
+from crm.interactions import log_stage_interaction
 from crm.models import Order, OrderItem
 from crm.services import sync_order_status_from_production
 
@@ -88,13 +90,36 @@ def create_default_production_stages(sender, instance, created, **kwargs):
 
 
 @receiver(post_save, sender=ProductionStage)
-def sync_order_status_after_stage_save(sender, instance, **kwargs):
+def sync_order_status_after_stage_save(sender, instance, created, **kwargs):
+    if is_order_deleting(instance.order.pk):
+        return
     sync_order_status_from_production(instance.order, save=True)
+    log_stage_interaction(
+        instance,
+        created=created,
+        previous=getattr(instance, "_interaction_previous_state", {}),
+        actor=get_current_user(),
+    )
+
+
+@receiver(pre_save, sender=ProductionStage)
+def store_stage_interaction_state(sender, instance, **kwargs):
+    if not instance.pk:
+        instance._interaction_previous_state = {}
+        return
+    instance._interaction_previous_state = (
+        sender.objects.filter(pk=instance.pk)
+        .values("status", "responsible_id", "planned_start", "planned_end", "comment")
+        .first()
+        or {}
+    )
 
 
 @receiver(post_delete, sender=ProductionStage)
 def sync_order_status_after_stage_delete(sender, instance, **kwargs):
     order_id = OrderItem.objects.filter(pk=instance.order_item_id).values_list("order_id", flat=True).first()
+    if is_order_deleting(order_id):
+        return
     order = Order.objects.filter(pk=order_id).first() if order_id else None
     should_sync_order = order is not None and OrderItem.objects.filter(order_id=order.pk).exists()
     if should_sync_order:
@@ -136,6 +161,8 @@ def detach_slot_history_slot_links(sender, instance, **kwargs):
 
 @receiver(post_save, sender=ProductionSlot)
 def sync_after_slot_save(sender, instance, created, **kwargs):
+    if is_order_deleting(instance.order_id):
+        return
     if instance.stage_id:
         sync_stage_schedule_from_slots(instance.stage, save=True)
     sync_order_status_from_production(instance.order, save=True)
@@ -156,6 +183,8 @@ def sync_after_slot_save(sender, instance, created, **kwargs):
 
 @receiver(post_delete, sender=ProductionSlot)
 def sync_after_slot_delete(sender, instance, **kwargs):
+    if is_order_deleting(instance.order_id):
+        return
     stage = ProductionStage.objects.filter(pk=instance.stage_id).first() if instance.stage_id else None
     order = Order.objects.filter(pk=instance.order_id).first() if instance.order_id else None
     if stage is not None:

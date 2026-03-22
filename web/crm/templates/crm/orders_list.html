@@ -1,9 +1,45 @@
 {% extends "crm/workspace_base.html" %}
+{% load core_display %}
 
 {% block title %}Замовлення{% endblock %}
-{% block eyebrow %}CRM orders{% endblock %}
+{% block eyebrow %}CRM · замовлення{% endblock %}
 {% block hero_title %}Замовлення{% endblock %}
 {% block hero_text %}Реєстр замовлень зі статусами, строками та відповідальними.{% endblock %}
+
+{% block crm_extra_head %}
+    <style>
+        .copy-action {
+            min-height: 28px;
+            padding: 4px 8px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--surface-muted);
+            color: var(--ink);
+            font: inherit;
+            cursor: pointer;
+        }
+    </style>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script>
+        (() => {
+            document.querySelectorAll("[data-copy-text]").forEach((button) => {
+                button.addEventListener("click", async () => {
+                    try {
+                        await navigator.clipboard.writeText(button.dataset.copyText || "");
+                        button.textContent = "Скопійовано";
+                        window.setTimeout(() => {
+                            button.textContent = "Запит доставки";
+                        }, 1200);
+                    } catch (error) {
+                        window.alert("Не вдалося скопіювати текст.");
+                    }
+                });
+            });
+        })();
+    </script>
+{% endblock %}
 
 {% block hero_stats %}
     <div class="chip">
@@ -34,7 +70,7 @@
                     <option value="mine"{% if selected_manager == "mine" %} selected{% endif %}>Мої замовлення</option>
                     {% for manager in manager_options %}
                         <option value="{{ manager.id }}"{% if selected_manager == manager.id|stringformat:"s" %} selected{% endif %}>
-                            {{ manager.email|default:manager.username }}
+                            {{ manager|user_display }}
                         </option>
                     {% endfor %}
                 </select>
@@ -66,7 +102,7 @@
     </section>
 
     <section class="panel">
-        <span class="eyebrow">Orders</span>
+        <span class="eyebrow">Замовлення</span>
         <h2>Список замовлень</h2>
         {% if orders %}
             <div class="table-wrap">
@@ -102,7 +138,7 @@
                                 {% endif %}
                             </td>
                             <td><a href="{{ order.client_url }}">{{ order.contact.client.name }}</a></td>
-                            <td>{% if order.manager %}{{ order.manager.email|default:order.manager.username }}{% else %}—{% endif %}</td>
+                            <td>{% if order.manager %}{{ order.manager|user_display }}{% else %}—{% endif %}</td>
                             <td>{{ order.get_status_display }}</td>
                             <td>{{ order.deadline|date:"d.m.Y"|default:"—" }}</td>
                             <td>{{ order.items_total|floatformat:2 }}</td>
@@ -111,6 +147,7 @@
                                     {% if order.edit_url %}
                                         <a href="{{ order.edit_url }}">Редагувати</a>
                                     {% endif %}
+                                    <button type="button" class="copy-action" data-copy-text="{{ order.delivery_request_text|escapejs }}">Запит доставки</button>
                                     {% if order.delete_url %}
                                         <a href="{{ order.delete_url }}">Видалити</a>
                                     {% endif %}

@@ -1,7 +1,8 @@
 {% extends "core/dashboard_base.html" %}
+{% load core_display %}
 
 {% block title %}Прострочені етапи{% endblock %}
-{% block eyebrow %}Production report{% endblock %}
+{% block eyebrow %}Звіт виробництва{% endblock %}
 {% block hero_title %}Звіт по прострочених етапах{% endblock %}
 {% block hero_text %}Етапи, у яких зірваний плановий строк завершення або вони зависли в роботі.{% endblock %}
 
@@ -12,7 +13,7 @@
     </div>
     <div class="chip">
         <strong>{{ summary.max_overdue_hours }}</strong>
-        <span>Макс. просрочка, год</span>
+        <span>Макс. прострочення, год</span>
     </div>
 {% endblock %}
 
@@ -66,14 +67,14 @@
                 </select>
             </div>
             <button type="submit">Оновити</button>
-            <a class="button-link" href="{% url 'production_dashboard' %}">До workspace</a>
+            <a class="button-link" href="{% url 'production_dashboard' %}">До робочого місця</a>
         </form>
     </section>
 
     <section class="panel">
         <div class="panel-head">
             <div>
-                <span class="eyebrow">Overdue list</span>
+                <span class="eyebrow">Список прострочень</span>
                 <h2>Проблемні етапи</h2>
             </div>
         </div>
@@ -88,7 +89,7 @@
                         <th>Ресурс</th>
                         <th>Відповідальний</th>
                         <th>Планове завершення</th>
-                        <th>Просрочка</th>
+                        <th>Прострочення</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -106,7 +107,7 @@
                                 <div class="muted">{{ row.stage.get_stage_type_display }} / {{ row.stage.get_status_display }}</div>
                             </td>
                             <td>{{ row.resource_label|default:"Не призначено" }}</td>
-                            <td>{% if row.stage.responsible %}{{ row.stage.responsible.email|default:row.stage.responsible.username }}{% else %}—{% endif %}</td>
+                            <td>{% if row.stage.responsible %}{{ row.stage.responsible|user_display }}{% else %}—{% endif %}</td>
                             <td>{% if row.planned_end %}{{ row.planned_end|date:"d.m.Y H:i" }}{% else %}—{% endif %}</td>
                             <td>{{ row.overdue_hours }} год</td>
                         </tr>

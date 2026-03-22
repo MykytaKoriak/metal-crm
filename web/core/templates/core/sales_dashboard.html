@@ -1,7 +1,7 @@
 {% extends "core/dashboard_base.html" %}
 
 {% block title %}Менеджер з продажу{% endblock %}
-{% block eyebrow %}Sales dashboard{% endblock %}
+{% block eyebrow %}Панель продажів{% endblock %}
 {% block hero_title %}Робочий стіл менеджера{% endblock %}
 {% block hero_text %}Особисті задачі, замовлення та найближчі дедлайни.{% endblock %}
 
@@ -28,7 +28,7 @@
     <section class="panel">
         <div class="panel-head">
             <div>
-                <span class="eyebrow">Kanban</span>
+                <span class="eyebrow">Канбан</span>
                 <h2>Мої задачі</h2>
             </div>
             <a href="{% url 'crm_tasks_kanban' %}?assigned_to=mine" class="button-link">Відкрити повну дошку</a>
@@ -63,7 +63,7 @@
         <article class="panel">
             <div class="panel-head">
                 <div>
-                    <span class="eyebrow">Orders</span>
+                    <span class="eyebrow">Замовлення</span>
                     <h2>Мої замовлення по статусах</h2>
                 </div>
                 <a href="{% url 'production_orders_in_work_report' %}" class="button-link">Звіт по замовленнях</a>
@@ -80,7 +80,7 @@
         </article>
 
         <article class="panel">
-            <span class="eyebrow">Deadlines</span>
+            <span class="eyebrow">Дедлайни</span>
             <h2>Наближені дедлайни</h2>
             {% if nearest_deadlines %}
                 <div class="mini-list">

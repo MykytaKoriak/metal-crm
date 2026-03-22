@@ -1,7 +1,7 @@
 {% extends "crm/workspace_base.html" %}
 
 {% block title %}{{ page_title }}{% endblock %}
-{% block eyebrow %}CRM {{ object_label|lower }}{% endblock %}
+{% block eyebrow %}CRM · {{ object_label|lower }}{% endblock %}
 {% block hero_title %}{{ hero_title }}{% endblock %}
 {% block hero_text %}{{ hero_text }}{% endblock %}
 
@@ -142,6 +142,39 @@
             background: rgba(163, 58, 49, 0.08);
         }
 
+        .copy-shell {
+            display: grid;
+            gap: 8px;
+            margin-top: 12px;
+            padding: 10px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--surface-muted);
+        }
+
+        .copy-shell textarea {
+            width: 100%;
+            min-height: 140px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 8px;
+            background: var(--surface);
+            font: inherit;
+            resize: vertical;
+        }
+
+        .copy-shell button {
+            justify-self: start;
+            min-height: 30px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--line);
+            background: var(--surface);
+            color: inherit;
+            font: inherit;
+            cursor: pointer;
+        }
+
         @media (max-width: 980px) {
             .form-grid,
             .line-grid {
@@ -151,14 +184,40 @@
     </style>
 {% endblock %}
 
+{% block extra_scripts %}
+    {% if copy_panel_text %}
+        <script>
+            (() => {
+                const source = document.querySelector("[data-copy-source]");
+                const trigger = document.querySelector("[data-copy-trigger]");
+                if (!source || !trigger) {
+                    return;
+                }
+
+                trigger.addEventListener("click", async () => {
+                    try {
+                        await navigator.clipboard.writeText(source.value || "");
+                        trigger.textContent = "Скопійовано";
+                        window.setTimeout(() => {
+                            trigger.textContent = "Скопіювати в буфер";
+                        }, 1200);
+                    } catch (error) {
+                        window.alert("Не вдалося скопіювати текст.");
+                    }
+                });
+            })();
+        </script>
+    {% endif %}
+{% endblock %}
+
 {% block hero_stats %}
     <div class="chip">
         <strong>{{ mode_label }}</strong>
-        <span>Mode</span>
+        <span>Режим</span>
     </div>
     <div class="chip">
         <strong>{{ object_label }}</strong>
-        <span>Entity</span>
+        <span>Сутність</span>
     </div>
 {% endblock %}
 
@@ -198,10 +257,10 @@
                 <section class="form-shell">
                     <div class="line-header">
                         <div>
-                            <span class="eyebrow">Order items</span>
-                            <h2>Позиції замовлення</h2>
+                            <span class="eyebrow">{{ formset_eyebrow }}</span>
+                            <h2>{{ formset_title }}</h2>
                         </div>
-                        <p class="muted">Назва замовлення оновиться автоматично після збереження.</p>
+                        <p class="muted">{{ formset_help }}</p>
                     </div>
 
                     {{ formset.management_form }}
@@ -212,9 +271,9 @@
                     {% for item_form in formset %}
                         <div class="line-card full">
                             <div class="line-header">
-                                <h3>Позиція {{ forloop.counter }}</h3>
+                                <h3>{{ formset_item_label }} {{ forloop.counter }}</h3>
                                 {% if item_form.DELETE %}
-                                    <label class="checkbox-row">{{ item_form.DELETE }} Видалити позицію</label>
+                                    <label class="checkbox-row">{{ item_form.DELETE }} Видалити рядок</label>
                                 {% endif %}
                             </div>
 
@@ -258,5 +317,18 @@
                 {% endif %}
             </div>
         </form>
+        {% if copy_panel_text %}
+            <div class="copy-shell">
+                <div>
+                    <span class="eyebrow">Блок копіювання</span>
+                    <h2>{{ copy_panel_title|default:"Текст для копіювання" }}</h2>
+                    {% if copy_panel_help %}
+                        <p class="muted">{{ copy_panel_help }}</p>
+                    {% endif %}
+                </div>
+                <textarea readonly data-copy-source>{{ copy_panel_text }}</textarea>
+                <button type="button" data-copy-trigger>Скопіювати в буфер</button>
+            </div>
+        {% endif %}
     </section>
 {% endblock %}

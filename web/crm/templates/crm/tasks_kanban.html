@@ -1,8 +1,9 @@
 {% extends "crm/workspace_base.html" %}
+{% load core_display %}
 
-{% block title %}Kanban задач{% endblock %}
-{% block eyebrow %}CRM kanban{% endblock %}
-{% block hero_title %}Kanban-дошка задач{% endblock %}
+{% block title %}Канбан задач{% endblock %}
+{% block eyebrow %}CRM · канбан{% endblock %}
+{% block hero_title %}Канбан-дошка задач{% endblock %}
 {% block hero_text %}Статусна дошка задач з фільтрами та швидкою зміною статусу.{% endblock %}
 
 {% block crm_extra_head %}
@@ -152,12 +153,21 @@
         <div class="toolbar">
             <form method="get" class="search-form">
                 <input type="search" name="q" value="{{ search }}" placeholder="Пошук по задачах, клієнтах, контактах і замовленнях">
+                <select name="assigned_by">
+                    <option value="">Призначив будь-хто</option>
+                    <option value="mine"{% if selected_assigned_by == "mine" %} selected{% endif %}>Призначені мною</option>
+                    {% for user_option in assigned_by_options %}
+                        <option value="{{ user_option.id }}"{% if selected_assigned_by == user_option.id|stringformat:"s" %} selected{% endif %}>
+                            {{ user_option|user_display }}
+                        </option>
+                    {% endfor %}
+                </select>
                 <select name="assigned_to">
                     <option value="">Усі відповідальні</option>
                     <option value="mine"{% if selected_assigned_to == "mine" %} selected{% endif %}>Мої задачі</option>
                     {% for user_option in assigned_to_options %}
                         <option value="{{ user_option.id }}"{% if selected_assigned_to == user_option.id|stringformat:"s" %} selected{% endif %}>
-                            {{ user_option.email|default:user_option.username }}
+                            {{ user_option|user_display }}
                         </option>
                     {% endfor %}
                 </select>
@@ -195,7 +205,7 @@
     </section>
 
     <section class="panel">
-        <span class="eyebrow">Task board</span>
+        <span class="eyebrow">Дошка задач</span>
         <h2>Статусні колонки</h2>
         <div
             class="kanban-board"
@@ -221,6 +231,7 @@
                                     <strong>{% if task.edit_url %}<a href="{{ task.edit_url }}">{{ task.title }}</a>{% else %}{{ task.title }}{% endif %}</strong>
                                 </div>
                                 <div class="kanban-meta">
+                                    <span class="pill {{ task.priority_tone }}">{{ task.get_priority_display }}</span>
                                     <span class="pill {{ task.status_tone }}" data-task-status>{{ task.get_status_display }}</span>
                                     {% if task.is_overdue %}
                                         <span class="pill overdue">прострочено</span>
@@ -233,6 +244,9 @@
                                         · {{ task.contact.full_name }}
                                     {% endif %}
                                 </p>
+                                {% if task.description %}
+                                    <p>{{ task.description }}</p>
+                                {% endif %}
                                 {% if task.order_id %}
                                     <p class="meta-line">
                                         Замовлення:
@@ -243,9 +257,9 @@
                                         {% endif %}
                                     </p>
                                 {% endif %}
-                                <p class="meta-line">Відповідальний: {% if task.assigned_to %}{{ task.assigned_to.email|default:task.assigned_to.username }}{% else %}—{% endif %}</p>
+                                <p class="meta-line">Відповідальний: {% if task.assigned_to %}{{ task.assigned_to|user_display }}{% else %}—{% endif %}</p>
                                 {% if task.comment %}
-                                    <p class="meta-line">{{ task.comment }}</p>
+                                    <p class="meta-line">Коментар: {{ task.comment }}</p>
                                 {% endif %}
                                 {% if can_change_task %}
                                     <form method="post" action="{{ task.status_update_url }}" class="kanban-quick-form" data-status-form>

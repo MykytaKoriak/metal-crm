@@ -6,7 +6,7 @@ from .models import UserProfile
 
 class EmailAuthenticationForm(AuthenticationForm):
     username = forms.CharField(
-        label="Email or login",
+        label="Електронна пошта або логін",
         widget=forms.TextInput(attrs={"autofocus": True, "autocomplete": "username"}),
     )
 
@@ -17,16 +17,20 @@ class TelegramPreferencesForm(forms.ModelForm):
         fields = (
             "telegram_notifications_enabled",
             "telegram_notify_new_tasks",
+            "telegram_notify_new_orders",
             "telegram_notify_deadlines",
             "telegram_notify_overdue",
             "telegram_notify_order_updates",
+            "telegram_notify_comments",
             "telegram_notify_production_events",
         )
         widgets = {
             "telegram_notifications_enabled": forms.CheckboxInput(),
             "telegram_notify_new_tasks": forms.CheckboxInput(),
+            "telegram_notify_new_orders": forms.CheckboxInput(),
             "telegram_notify_deadlines": forms.CheckboxInput(),
             "telegram_notify_overdue": forms.CheckboxInput(),
             "telegram_notify_order_updates": forms.CheckboxInput(),
+            "telegram_notify_comments": forms.CheckboxInput(),
             "telegram_notify_production_events": forms.CheckboxInput(),
         }

@@ -1,9 +1,9 @@
 {% extends "core/dashboard_base.html" %}
 
-{% block title %}My Account{% endblock %}
-{% block eyebrow %}Account{% endblock %}
+{% block title %}Мій акаунт{% endblock %}
+{% block eyebrow %}Акаунт{% endblock %}
 {% block hero_title %}{{ profile.display_name }}{% endblock %}
-{% block hero_text %}Рабочий профиль, Telegram-привязка и персональные задачи пользователя.{% endblock %}
+{% block hero_text %}Робочий профіль, Telegram-прив’язка та персональні задачі користувача.{% endblock %}
 
 {% block extra_head %}
     <style>
@@ -172,19 +172,19 @@
 {% block hero_stats %}
     <div class="chip">
         <strong>{{ stats.total_tasks }}</strong>
-        <span>Всего задач</span>
+        <span>Усього задач</span>
     </div>
     <div class="chip">
         <strong>{{ stats.open_tasks }}</strong>
-        <span>Открытые</span>
+        <span>Відкриті</span>
     </div>
     <div class="chip">
         <strong>{{ stats.overdue_tasks }}</strong>
-        <span>Просроченные</span>
+        <span>Прострочені</span>
     </div>
     <div class="chip">
         <strong>{{ stats.completion_rate }}%</strong>
-        <span>Выполнение</span>
+        <span>Виконання</span>
     </div>
 {% endblock %}
 
@@ -198,15 +198,15 @@
     {% endif %}
 
     <section class="panel">
-        <span class="eyebrow">Profile</span>
-        <h2>Основные данные</h2>
+        <span class="eyebrow">Профіль</span>
+        <h2>Основні дані</h2>
         <div class="info-grid">
             <div class="info-card">
                 <span>Роль</span>
                 <strong>{{ profile.get_role_display }}</strong>
             </div>
             <div class="info-card">
-                <span>Email</span>
+                <span>Електронна пошта</span>
                 <strong>{{ user.email|default:user.username }}</strong>
             </div>
             <div class="info-card">
@@ -215,7 +215,7 @@
             </div>
             <div class="info-card">
                 <span>Статус</span>
-                <strong>{% if user.is_active %}Активный{% else %}Неактивный{% endif %}</strong>
+                <strong>{% if user.is_active %}Активний{% else %}Неактивний{% endif %}</strong>
             </div>
         </div>
     </section>
@@ -223,86 +223,86 @@
     <section class="section-grid two-up">
         <article class="panel">
             <span class="eyebrow">Telegram</span>
-            <h2>Привязка бота</h2>
+            <h2>Прив’язка бота</h2>
             <div class="info-grid">
                 <div class="info-card">
                     <span>Статус</span>
-                    <strong>{% if profile.telegram_is_linked %}Подключен{% else %}Не подключен{% endif %}</strong>
+                    <strong>{% if profile.telegram_is_linked %}Підключено{% else %}Не підключено{% endif %}</strong>
                 </div>
                 <div class="info-card">
-                    <span>Chat ID</span>
+                    <span>Ідентифікатор чату</span>
                     <strong>{{ profile.telegram_chat_id|default:"-" }}</strong>
                 </div>
                 <div class="info-card">
-                    <span>Username</span>
+                    <span>Ім’я користувача</span>
                     <strong>{{ profile.telegram_username|default:"-" }}</strong>
                 </div>
                 <div class="info-card">
-                    <span>Код привязки</span>
+                    <span>Код прив’язки</span>
                     <strong><span class="code-box">{{ profile.telegram_link_code }}</span></strong>
                 </div>
             </div>
             <div class="helper-row">
-                <span class="helper-copy">Команды: <code>/link {{ profile.telegram_link_code }}</code>, <code>/tasks</code>, <code>/orders</code>, <code>/unlink</code>.</span>
+                <span class="helper-copy">Команди: <code>/link {{ profile.telegram_link_code }}</code>, <code>/me</code>, <code>/help</code>, <code>/tasks</code>, <code>/orders</code>, <code>/unlink</code>.</span>
             </div>
             {% if profile.telegram_linked_at %}
                 <div class="helper-row">
-                    <span class="helper-copy">Привязано: {{ profile.telegram_linked_at|date:"d.m.Y H:i" }}</span>
+                    <span class="helper-copy">Прив’язано: {{ profile.telegram_linked_at|date:"d.m.Y H:i" }}</span>
                 </div>
             {% endif %}
         </article>
 
         <article class="panel">
-            <span class="eyebrow">Statistics</span>
-            <h2>Задачи пользователя</h2>
+            <span class="eyebrow">Статистика</span>
+            <h2>Задачі користувача</h2>
             <div class="stats-grid">
                 <div class="metric">
                     <strong>{{ stats.total_tasks }}</strong>
-                    <span>Всего</span>
+                    <span>Усього</span>
                 </div>
                 <div class="metric">
                     <strong>{{ stats.open_tasks }}</strong>
-                    <span>Открытые</span>
+                    <span>Відкриті</span>
                 </div>
                 <div class="metric">
                     <strong>{{ stats.new_tasks }}</strong>
-                    <span>Новые</span>
+                    <span>Нові</span>
                 </div>
                 <div class="metric">
                     <strong>{{ stats.in_progress_tasks }}</strong>
-                    <span>В работе</span>
+                    <span>В роботі</span>
                 </div>
                 <div class="metric">
                     <strong>{{ stats.waiting_tasks }}</strong>
-                    <span>Ожидают</span>
+                    <span>Очікують</span>
                 </div>
                 <div class="metric">
                     <strong>{{ stats.completed_tasks }}</strong>
-                    <span>Выполнены</span>
+                    <span>Виконані</span>
                 </div>
                 <div class="metric">
                     <strong>{{ stats.overdue_tasks }}</strong>
-                    <span>Просрочены</span>
+                    <span>Прострочені</span>
                 </div>
                 <div class="metric">
                     <strong>{{ stats.due_today_tasks }}</strong>
-                    <span>На сегодня</span>
+                    <span>На сьогодні</span>
                 </div>
                 <div class="metric">
                     <strong>{{ stats.tasks_created_by_me }}</strong>
-                    <span>Создано мной</span>
+                    <span>Створено мною</span>
                 </div>
                 <div class="metric">
                     <strong>{{ stats.completion_rate }}%</strong>
-                    <span>Выполнение</span>
+                    <span>Виконання</span>
                 </div>
             </div>
         </article>
     </section>
 
     <section class="panel">
-        <span class="eyebrow">Notifications</span>
-        <h2>Настройки Telegram-уведомлений</h2>
+        <span class="eyebrow">Сповіщення</span>
+        <h2>Налаштування Telegram-сповіщень</h2>
         <form method="post" action="{% url 'update_telegram_preferences' %}">
             {% csrf_token %}
             <div class="toggle-grid">
@@ -310,8 +310,8 @@
                     <label for="{{ telegram_preferences_form.telegram_notifications_enabled.id_for_label }}">
                         {{ telegram_preferences_form.telegram_notifications_enabled }}
                         <span>
-                            <strong>Включить Telegram-уведомления</strong>
-                            <span class="toggle-copy">Общий переключатель доставки уведомлений и напоминаний.</span>
+                            <strong>Увімкнути Telegram-сповіщення</strong>
+                            <span class="toggle-copy">Загальний перемикач доставки сповіщень і нагадувань.</span>
                         </span>
                     </label>
                 </div>
@@ -319,8 +319,17 @@
                     <label for="{{ telegram_preferences_form.telegram_notify_new_tasks.id_for_label }}">
                         {{ telegram_preferences_form.telegram_notify_new_tasks }}
                         <span>
-                            <strong>Новые задачи</strong>
-                            <span class="toggle-copy">Уведомления при создании и перепривязке задач на пользователя.</span>
+                            <strong>Нові задачі</strong>
+                            <span class="toggle-copy">Сповіщення при створенні та переприв’язці задач на користувача.</span>
+                        </span>
+                    </label>
+                </div>
+                <div class="toggle-card">
+                    <label for="{{ telegram_preferences_form.telegram_notify_new_orders.id_for_label }}">
+                        {{ telegram_preferences_form.telegram_notify_new_orders }}
+                        <span>
+                            <strong>Нові замовлення</strong>
+                            <span class="toggle-copy">Сповіщати менеджера, коли створено нове замовлення.</span>
                         </span>
                     </label>
                 </div>
@@ -328,8 +337,8 @@
                     <label for="{{ telegram_preferences_form.telegram_notify_deadlines.id_for_label }}">
                         {{ telegram_preferences_form.telegram_notify_deadlines }}
                         <span>
-                            <strong>Приближение дедлайна</strong>
-                            <span class="toggle-copy">Напоминания по задачам и заказам с близким сроком.</span>
+                            <strong>Наближення дедлайну</strong>
+                            <span class="toggle-copy">Нагадування по задачах і замовленнях із близьким строком.</span>
                         </span>
                     </label>
                 </div>
@@ -337,8 +346,8 @@
                     <label for="{{ telegram_preferences_form.telegram_notify_overdue.id_for_label }}">
                         {{ telegram_preferences_form.telegram_notify_overdue }}
                         <span>
-                            <strong>Просрочка</strong>
-                            <span class="toggle-copy">Ежедневные уведомления по просроченным задачам и заказам.</span>
+                            <strong>Прострочення</strong>
+                            <span class="toggle-copy">Щоденні сповіщення по прострочених задачах і замовленнях.</span>
                         </span>
                     </label>
                 </div>
@@ -346,8 +355,17 @@
                     <label for="{{ telegram_preferences_form.telegram_notify_order_updates.id_for_label }}">
                         {{ telegram_preferences_form.telegram_notify_order_updates }}
                         <span>
-                            <strong>Статусы заказов</strong>
-                            <span class="toggle-copy">Изменение статуса и ключевые переходы по заказу.</span>
+                            <strong>Статуси замовлень</strong>
+                            <span class="toggle-copy">Зміна статусу та ключові переходи по замовленню.</span>
+                        </span>
+                    </label>
+                </div>
+                <div class="toggle-card">
+                    <label for="{{ telegram_preferences_form.telegram_notify_comments.id_for_label }}">
+                        {{ telegram_preferences_form.telegram_notify_comments }}
+                        <span>
+                            <strong>Коментарі</strong>
+                            <span class="toggle-copy">Сповіщати про нові коментарі в задачах і замовленнях.</span>
                         </span>
                     </label>
                 </div>
@@ -355,22 +373,22 @@
                     <label for="{{ telegram_preferences_form.telegram_notify_production_events.id_for_label }}">
                         {{ telegram_preferences_form.telegram_notify_production_events }}
                         <span>
-                            <strong>События производства</strong>
-                            <span class="toggle-copy">Старт, блокировка, завершение и отмена этапов производства.</span>
+                            <strong>Події виробництва</strong>
+                            <span class="toggle-copy">Старт, блокування, завершення й скасування етапів виробництва.</span>
                         </span>
                     </label>
                 </div>
             </div>
             <div class="form-actions">
-                <button type="submit" class="submit-button">Сохранить настройки</button>
+                <button type="submit" class="submit-button">Зберегти налаштування</button>
             </div>
         </form>
     </section>
 
     <section class="task-grid">
         <article class="panel">
-            <span class="eyebrow">Open</span>
-            <h2>Текущие задачи</h2>
+            <span class="eyebrow">Активні</span>
+            <h2>Поточні задачі</h2>
             {% if current_tasks %}
                 <ul class="task-list">
                     {% for task in current_tasks %}
@@ -389,24 +407,24 @@
                             {% if task.comment %}
                                 <p>{{ task.comment }}</p>
                             {% endif %}
-                            <p class="task-copy">Клиент: {{ task.client.name }}</p>
+                            <p class="task-copy">Клієнт: {{ task.client.name }}</p>
                             {% if task.contact %}
                                 <p class="task-copy">Контакт: {{ task.contact.full_name }}</p>
                             {% endif %}
                             {% if task.order_id %}
-                                <p class="task-copy">{% if task.order.title %}{{ task.order.title }}{% else %}Заказ #{{ task.order_id }}{% endif %}</p>
+                                <p class="task-copy">{% if task.order.title %}{{ task.order.title }}{% else %}Замовлення #{{ task.order_id }}{% endif %}</p>
                             {% endif %}
                         </li>
                     {% endfor %}
                 </ul>
             {% else %}
-                <p class="empty">Текущих задач нет.</p>
+                <p class="empty">Поточних задач немає.</p>
             {% endif %}
         </article>
 
         <article class="panel">
-            <span class="eyebrow">Risk</span>
-            <h2>Просроченные задачи</h2>
+            <span class="eyebrow">Ризики</span>
+            <h2>Прострочені задачі</h2>
             {% if overdue_tasks %}
                 <ul class="task-list">
                     {% for task in overdue_tasks %}
@@ -425,24 +443,24 @@
                             {% if task.comment %}
                                 <p>{{ task.comment }}</p>
                             {% endif %}
-                            <p class="task-copy">Клиент: {{ task.client.name }}</p>
+                            <p class="task-copy">Клієнт: {{ task.client.name }}</p>
                             {% if task.contact %}
                                 <p class="task-copy">Контакт: {{ task.contact.full_name }}</p>
                             {% endif %}
                             {% if task.order_id %}
-                                <p class="task-copy">{% if task.order.title %}{{ task.order.title }}{% else %}Заказ #{{ task.order_id }}{% endif %}</p>
+                                <p class="task-copy">{% if task.order.title %}{{ task.order.title }}{% else %}Замовлення #{{ task.order_id }}{% endif %}</p>
                             {% endif %}
                         </li>
                     {% endfor %}
                 </ul>
             {% else %}
-                <p class="empty">Просроченных задач нет.</p>
+                <p class="empty">Прострочених задач немає.</p>
             {% endif %}
         </article>
 
         <article class="panel">
-            <span class="eyebrow">History</span>
-            <h2>Выполненные задачи</h2>
+            <span class="eyebrow">Історія</span>
+            <h2>Виконані задачі</h2>
             {% if completed_tasks %}
                 <ul class="task-list">
                     {% for task in completed_tasks %}
@@ -455,18 +473,18 @@
                             {% if task.comment %}
                                 <p>{{ task.comment }}</p>
                             {% endif %}
-                            <p class="task-copy">Клиент: {{ task.client.name }}</p>
+                            <p class="task-copy">Клієнт: {{ task.client.name }}</p>
                             {% if task.contact %}
                                 <p class="task-copy">Контакт: {{ task.contact.full_name }}</p>
                             {% endif %}
                             {% if task.order_id %}
-                                <p class="task-copy">{% if task.order.title %}{{ task.order.title }}{% else %}Заказ #{{ task.order_id }}{% endif %}</p>
+                                <p class="task-copy">{% if task.order.title %}{{ task.order.title }}{% else %}Замовлення #{{ task.order_id }}{% endif %}</p>
                             {% endif %}
                         </li>
                     {% endfor %}
                 </ul>
             {% else %}
-                <p class="empty">Выполненных задач пока нет.</p>
+                <p class="empty">Виконаних задач поки немає.</p>
             {% endif %}
         </article>
     </section>

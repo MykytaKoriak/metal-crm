@@ -1,9 +1,10 @@
 {% extends "core/dashboard_base.html" %}
+{% load core_display %}
 
 {% block title %}Виробництво{% endblock %}
-{% block eyebrow %}Production workspace{% endblock %}
+{% block eyebrow %}Панель виробництва{% endblock %}
 {% block hero_title %}Робоче місце виробництва{% endblock %}
-{% block hero_text %}Черга етапів, календар ресурсів, перегруз, вільні вікна та прострочені роботи в одному екрані.{% endblock %}
+{% block hero_text %}Черга етапів, календар ресурсів, перевантаження, вільні вікна та прострочені роботи в одному екрані.{% endblock %}
 
 {% block hero_stats %}
     <div class="chip">
@@ -140,14 +141,14 @@
     <section class="panel">
         <div class="panel-head">
             <div>
-                <span class="eyebrow">Filters</span>
+                <span class="eyebrow">Фільтри</span>
                 <h2>Фільтри виробництва</h2>
             </div>
             <div class="link-row">
                 <a href="{% url 'production_free_slot_report' %}?resource_kind={{ filters.resource_kind }}{% if filters.resource_id %}&resource_id={{ filters.resource_id }}{% endif %}">Звіт по вільних слотах</a>
                 <a href="{% url 'production_overdue_stage_report' %}?resource_kind={{ filters.resource_kind }}{% if filters.resource_id %}&resource_id={{ filters.resource_id }}{% endif %}">Звіт по прострочених етапах</a>
                 <a href="{% url 'production_orders_in_work_report' %}">Звіт по замовленнях</a>
-                <a href="{% url 'machine_load_report' %}">Перегруз ресурсів</a>
+                <a href="{% url 'machine_load_report' %}">Перевантаження ресурсів</a>
             </div>
         </div>
         <form method="get" class="toolbar-form">
@@ -191,7 +192,7 @@
 
     <section class="section-grid three-up">
         <article class="panel">
-            <span class="eyebrow">Queue</span>
+            <span class="eyebrow">Черга</span>
             <h2>Стан черги</h2>
             <div class="metrics">
                 <div class="metric"><strong>{{ production_summary.queue_count }}</strong><span>Усі етапи</span></div>
@@ -200,7 +201,7 @@
             </div>
         </article>
         <article class="panel">
-            <span class="eyebrow">Deadlines</span>
+            <span class="eyebrow">Дедлайни</span>
             <h2>Проблемні зони</h2>
             <div class="metrics">
                 <div class="metric"><strong>{{ production_summary.overdue_stage_count }}</strong><span>Прострочені етапи</span></div>
@@ -209,7 +210,7 @@
             </div>
         </article>
         <article class="panel">
-            <span class="eyebrow">Capacity</span>
+            <span class="eyebrow">Резерв</span>
             <h2>Резерв по ресурсах</h2>
             <div class="metrics">
                 <div class="metric"><strong>{{ production_summary.free_window_count }}</strong><span>Вікон 1+ година</span></div>
@@ -222,7 +223,7 @@
     <section class="panel">
         <div class="panel-head">
             <div>
-                <span class="eyebrow">Execution queue</span>
+                <span class="eyebrow">Робоча черга</span>
                 <h2>Робоча черга етапів</h2>
             </div>
         </div>
@@ -264,7 +265,7 @@
                                         <span class="muted">{{ row.stage.order_item.order.contact.client.name }}</span>
                                     {% endif %}
                                     {% if row.stage.responsible %}
-                                        <span class="muted">Відповідальний: {{ row.stage.responsible.email|default:row.stage.responsible.username }}</span>
+                                        <span class="muted">Відповідальний: {{ row.stage.responsible|user_display }}</span>
                                     {% endif %}
                                 </div>
                             </td>
@@ -282,7 +283,7 @@
                                     <span>{% if row.planned_start %}{{ row.planned_start|date:"d.m.Y H:i" }}{% else %}—{% endif %}</span>
                                     <span>{% if row.planned_end %}{{ row.planned_end|date:"d.m.Y H:i" }}{% else %}—{% endif %}</span>
                                     {% if row.is_overdue %}
-                                        <span class="muted">Просрочка: {{ row.overdue_hours }} год</span>
+                                        <span class="muted">Прострочення: {{ row.overdue_hours }} год</span>
                                     {% endif %}
                                 </div>
                             </td>
@@ -290,7 +291,7 @@
                                 {% if row.slot %}
                                     <div class="status-strip">
                                         <span class="pill">{{ row.slot.get_planning_mode_display }}</span>
-                                        {% if row.slot.is_locked %}<span class="pill warning">Locked</span>{% endif %}
+                                        {% if row.slot.is_locked %}<span class="pill warning">Зафіксовано</span>{% endif %}
                                         {% if row.slot.dispatcher_comment %}<span class="pill">{{ row.slot.dispatcher_comment }}</span>{% endif %}
                                     </div>
                                 {% else %}
@@ -300,7 +301,7 @@
                             <td>
                                 <div class="status-strip">
                                     <span class="pill">{{ row.stage.get_status_display }}</span>
-                                    {% if row.is_overdue %}<span class="pill danger">Overdue</span>{% endif %}
+                                    {% if row.is_overdue %}<span class="pill danger">Прострочено</span>{% endif %}
                                 </div>
                             </td>
                             <td>
@@ -308,22 +309,22 @@
                                     <form method="post" action="{% url 'production_stage_status_update' row.stage.id %}">
                                         {% csrf_token %}
                                         <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                                        <button class="start" type="submit" name="status" value="in_progress">Start</button>
+                                        <button class="start" type="submit" name="status" value="in_progress">Почати</button>
                                     </form>
                                     <form method="post" action="{% url 'production_stage_status_update' row.stage.id %}">
                                         {% csrf_token %}
                                         <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                                        <button class="done" type="submit" name="status" value="done">Done</button>
+                                        <button class="done" type="submit" name="status" value="done">Завершити</button>
                                     </form>
                                     <form method="post" action="{% url 'production_stage_status_update' row.stage.id %}">
                                         {% csrf_token %}
                                         <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                                        <button class="block" type="submit" name="status" value="blocked">Block</button>
+                                        <button class="block" type="submit" name="status" value="blocked">Заблокувати</button>
                                     </form>
                                     <form method="post" action="{% url 'production_stage_status_update' row.stage.id %}">
                                         {% csrf_token %}
                                         <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                                        <button class="cancel" type="submit" name="status" value="cancelled">Cancel</button>
+                                        <button class="cancel" type="submit" name="status" value="cancelled">Скасувати</button>
                                     </form>
                                 </div>
                             </td>
@@ -341,7 +342,7 @@
         <article class="panel">
             <div class="panel-head">
                 <div>
-                    <span class="eyebrow">Calendar</span>
+                    <span class="eyebrow">Календар</span>
                     <h2>Календар ресурсів</h2>
                 </div>
             </div>
@@ -351,7 +352,7 @@
         <article class="panel">
             <div class="panel-head">
                 <div>
-                    <span class="eyebrow">Load</span>
+                    <span class="eyebrow">Завантаження</span>
                     <h2>Найбільш завантажені ресурси</h2>
                 </div>
             </div>
@@ -390,7 +391,7 @@
         <article class="panel">
             <div class="panel-head">
                 <div>
-                    <span class="eyebrow">Free windows</span>
+                    <span class="eyebrow">Вільні вікна</span>
                     <h2>Найближчі вільні вікна</h2>
                 </div>
                 <a class="button-link" href="{% url 'production_free_slot_report' %}?resource_kind={{ filters.resource_kind }}{% if filters.resource_id %}&resource_id={{ filters.resource_id }}{% endif %}">Повний звіт</a>
@@ -426,7 +427,7 @@
         <article class="panel">
             <div class="panel-head">
                 <div>
-                    <span class="eyebrow">Overdue stages</span>
+                    <span class="eyebrow">Прострочені етапи</span>
                     <h2>Прострочені етапи</h2>
                 </div>
                 <a class="button-link" href="{% url 'production_overdue_stage_report' %}?resource_kind={{ filters.resource_kind }}{% if filters.resource_id %}&resource_id={{ filters.resource_id }}{% endif %}">Повний звіт</a>
@@ -439,7 +440,7 @@
                             <th>Етап</th>
                             <th>Ресурс</th>
                             <th>Планове завершення</th>
-                            <th>Просрочка</th>
+                            <th>Прострочення</th>
                         </tr>
                         </thead>
                         <tbody>

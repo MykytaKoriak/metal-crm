@@ -21,17 +21,19 @@ class UserProfileInline(admin.StackedInline):
         "telegram_linked_at",
         "telegram_notifications_enabled",
         "telegram_notify_new_tasks",
+        "telegram_notify_new_orders",
         "telegram_notify_deadlines",
         "telegram_notify_overdue",
         "telegram_notify_order_updates",
+        "telegram_notify_comments",
         "telegram_notify_production_events",
     )
     readonly_fields = ("telegram_link_code", "telegram_linked_at")
 
 
 class AppUserCreationForm(forms.ModelForm):
-    password1 = forms.CharField(label="Password", widget=forms.PasswordInput)
-    password2 = forms.CharField(label="Password confirmation", widget=forms.PasswordInput)
+    password1 = forms.CharField(label="Пароль", widget=forms.PasswordInput)
+    password2 = forms.CharField(label="Підтвердження пароля", widget=forms.PasswordInput)
 
     class Meta:
         model = User
@@ -40,9 +42,9 @@ class AppUserCreationForm(forms.ModelForm):
     def clean_email(self):
         email = (self.cleaned_data.get("email") or "").strip().lower()
         if not email:
-            raise forms.ValidationError("Email is required.")
+            raise forms.ValidationError("Електронна пошта обов’язкова.")
         if User.objects.filter(email__iexact=email).exists():
-            raise forms.ValidationError("A user with this email already exists.")
+            raise forms.ValidationError("Користувач з такою електронною поштою вже існує.")
         return email
 
     def clean(self):
@@ -50,7 +52,7 @@ class AppUserCreationForm(forms.ModelForm):
         password1 = cleaned_data.get("password1")
         password2 = cleaned_data.get("password2")
         if password1 and password2 and password1 != password2:
-            self.add_error("password2", "Passwords do not match.")
+            self.add_error("password2", "Паролі не збігаються.")
         return cleaned_data
 
     def save(self, commit=True):
@@ -65,7 +67,7 @@ class AppUserCreationForm(forms.ModelForm):
 
 
 class AppUserChangeForm(forms.ModelForm):
-    password = ReadOnlyPasswordHashField(label="Password")
+    password = ReadOnlyPasswordHashField(label="Пароль")
 
     class Meta:
         model = User
@@ -82,10 +84,10 @@ class AppUserChangeForm(forms.ModelForm):
     def clean_email(self):
         email = (self.cleaned_data.get("email") or "").strip().lower()
         if not email:
-            raise forms.ValidationError("Email is required.")
+            raise forms.ValidationError("Електронна пошта обов’язкова.")
         qs = User.objects.filter(email__iexact=email).exclude(pk=self.instance.pk)
         if qs.exists():
-            raise forms.ValidationError("A user with this email already exists.")
+            raise forms.ValidationError("Користувач з такою електронною поштою вже існує.")
         return email
 
     def save(self, commit=True):
@@ -113,7 +115,7 @@ class UserProfileAdmin(admin.ModelAdmin):
     autocomplete_fields = ("user",)
     readonly_fields = ("telegram_link_code", "telegram_linked_at")
 
-    @admin.display(description="Email")
+    @admin.display(description="Електронна пошта")
     def user_email(self, obj):
         return obj.user.email
 

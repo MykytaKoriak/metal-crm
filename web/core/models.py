@@ -6,44 +6,46 @@ from django.utils.crypto import get_random_string
 
 class UserProfile(models.Model):
     class Role(models.TextChoices):
-        ADMIN = "admin", "Administrator"
-        SALES_MANAGER = "sales_manager", "Sales manager"
-        PRODUCTION = "production", "Production / Technologist"
-        EXECUTIVE = "executive", "Executive"
+        ADMIN = "admin", "Адміністратор"
+        SALES_MANAGER = "sales_manager", "Менеджер з продажу"
+        PRODUCTION = "production", "Виробництво / технолог"
+        EXECUTIVE = "executive", "Керівник"
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="profile",
-        verbose_name="User",
+        verbose_name="Користувач",
     )
-    full_name = models.CharField("Full name", max_length=255, blank=True)
-    phone = models.CharField("Phone", max_length=50, blank=True)
+    full_name = models.CharField("ПІБ", max_length=255, blank=True)
+    phone = models.CharField("Телефон", max_length=50, blank=True)
     role = models.CharField(
-        "Role",
+        "Роль",
         max_length=32,
         choices=Role.choices,
         default=Role.SALES_MANAGER,
     )
-    telegram_chat_id = models.CharField("Telegram ID", max_length=64, blank=True)
-    telegram_username = models.CharField("Telegram username", max_length=255, blank=True)
+    telegram_chat_id = models.CharField("ID Telegram-чату", max_length=64, blank=True)
+    telegram_username = models.CharField("Ім’я користувача Telegram", max_length=255, blank=True)
     telegram_link_code = models.CharField(
-        "Telegram link code",
+        "Код прив’язки Telegram",
         max_length=24,
         unique=True,
         blank=True,
     )
-    telegram_linked_at = models.DateTimeField("Telegram linked at", null=True, blank=True)
-    telegram_notifications_enabled = models.BooleanField("Telegram notifications enabled", default=True)
-    telegram_notify_new_tasks = models.BooleanField("Notify about new tasks", default=True)
-    telegram_notify_deadlines = models.BooleanField("Notify about approaching deadlines", default=True)
-    telegram_notify_overdue = models.BooleanField("Notify about overdue items", default=True)
-    telegram_notify_order_updates = models.BooleanField("Notify about order updates", default=True)
-    telegram_notify_production_events = models.BooleanField("Notify about production events", default=True)
+    telegram_linked_at = models.DateTimeField("Прив’язано до Telegram", null=True, blank=True)
+    telegram_notifications_enabled = models.BooleanField("Telegram-сповіщення увімкнено", default=True)
+    telegram_notify_new_tasks = models.BooleanField("Сповіщати про нові задачі", default=True)
+    telegram_notify_new_orders = models.BooleanField("Сповіщати про нові замовлення", default=True)
+    telegram_notify_deadlines = models.BooleanField("Сповіщати про наближення дедлайнів", default=True)
+    telegram_notify_overdue = models.BooleanField("Сповіщати про прострочення", default=True)
+    telegram_notify_order_updates = models.BooleanField("Сповіщати про оновлення замовлень", default=True)
+    telegram_notify_comments = models.BooleanField("Сповіщати про коментарі", default=True)
+    telegram_notify_production_events = models.BooleanField("Сповіщати про події виробництва", default=True)
 
     class Meta:
-        verbose_name = "User profile"
-        verbose_name_plural = "User profiles"
+        verbose_name = "Профіль користувача"
+        verbose_name_plural = "Профілі користувачів"
         ordering = ("full_name", "user__email", "user__username")
 
     def __str__(self):
@@ -77,73 +79,76 @@ class UserProfile(models.Model):
 
 class TelegramUpdateLog(models.Model):
     class Status(models.TextChoices):
-        PROCESSED = "processed", "Processed"
-        IGNORED = "ignored", "Ignored"
-        FAILED = "failed", "Failed"
+        PROCESSED = "processed", "Оброблено"
+        IGNORED = "ignored", "Проігноровано"
+        FAILED = "failed", "Помилка"
 
-    update_id = models.BigIntegerField("Telegram update ID", unique=True, db_index=True)
-    chat_id = models.CharField("Telegram chat ID", max_length=64, blank=True)
-    username = models.CharField("Telegram username", max_length=255, blank=True)
-    update_type = models.CharField("Update type", max_length=32, blank=True)
-    payload = models.JSONField("Payload", default=dict, blank=True)
+    update_id = models.BigIntegerField("ID оновлення Telegram", unique=True, db_index=True)
+    chat_id = models.CharField("ID Telegram-чату", max_length=64, blank=True)
+    username = models.CharField("Ім’я користувача Telegram", max_length=255, blank=True)
+    update_type = models.CharField("Тип оновлення", max_length=32, blank=True)
+    payload = models.JSONField("Вміст", default=dict, blank=True)
     status = models.CharField(
-        "Status",
+        "Статус",
         max_length=16,
         choices=Status.choices,
         default=Status.PROCESSED,
         db_index=True,
     )
-    error_message = models.TextField("Error message", blank=True)
-    processed_at = models.DateTimeField("Processed at", default=timezone.now, db_index=True)
-    created_at = models.DateTimeField("Created at", auto_now_add=True)
+    error_message = models.TextField("Текст помилки", blank=True)
+    processed_at = models.DateTimeField("Оброблено", default=timezone.now, db_index=True)
+    created_at = models.DateTimeField("Створено", auto_now_add=True)
 
     class Meta:
-        verbose_name = "Telegram update log"
-        verbose_name_plural = "Telegram update logs"
+        verbose_name = "Журнал оновлень Telegram"
+        verbose_name_plural = "Журнал оновлень Telegram"
         ordering = ("-processed_at", "-id")
 
     def __str__(self):
-        return f"Update {self.update_id} ({self.get_status_display()})"
+        return f"Оновлення {self.update_id} ({self.get_status_display()})"
 
 
 class TelegramNotification(models.Model):
     class Type(models.TextChoices):
-        TASK_CREATED = "task_created", "Task created"
-        TASK_DEADLINE = "task_deadline", "Task deadline"
-        TASK_OVERDUE = "task_overdue", "Task overdue"
-        ORDER_STATUS = "order_status", "Order status changed"
-        ORDER_DEADLINE = "order_deadline", "Order deadline"
-        ORDER_OVERDUE = "order_overdue", "Order overdue"
-        PRODUCTION_EVENT = "production_event", "Production event"
+        TASK_CREATED = "task_created", "Створено задачу"
+        TASK_COMMENT = "task_comment", "Коментар до задачі"
+        ORDER_CREATED = "order_created", "Створено замовлення"
+        ORDER_COMMENT = "order_comment", "Коментар до замовлення"
+        TASK_DEADLINE = "task_deadline", "Дедлайн задачі"
+        TASK_OVERDUE = "task_overdue", "Прострочена задача"
+        ORDER_STATUS = "order_status", "Змінено статус замовлення"
+        ORDER_DEADLINE = "order_deadline", "Дедлайн замовлення"
+        ORDER_OVERDUE = "order_overdue", "Прострочене замовлення"
+        PRODUCTION_EVENT = "production_event", "Подія виробництва"
 
     class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
-        SENT = "sent", "Sent"
-        SKIPPED = "skipped", "Skipped"
-        FAILED = "failed", "Failed"
+        PENDING = "pending", "У черзі"
+        SENT = "sent", "Надіслано"
+        SKIPPED = "skipped", "Пропущено"
+        FAILED = "failed", "Помилка"
 
     profile = models.ForeignKey(
         "core.UserProfile",
         related_name="telegram_notifications",
         on_delete=models.CASCADE,
-        verbose_name="Profile",
+        verbose_name="Профіль",
     )
     notification_type = models.CharField(
-        "Notification type",
+        "Тип сповіщення",
         max_length=32,
         choices=Type.choices,
         db_index=True,
     )
-    dedupe_key = models.CharField("Dedupe key", max_length=255, unique=True)
-    message_text = models.TextField("Message text")
-    payload = models.JSONField("Payload", default=dict, blank=True)
+    dedupe_key = models.CharField("Ключ дедуплікації", max_length=255, unique=True)
+    message_text = models.TextField("Текст повідомлення")
+    payload = models.JSONField("Вміст", default=dict, blank=True)
     task = models.ForeignKey(
         "crm.Task",
         related_name="telegram_notifications",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        verbose_name="Task",
+        verbose_name="Задача",
     )
     order = models.ForeignKey(
         "crm.Order",
@@ -151,7 +156,7 @@ class TelegramNotification(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        verbose_name="Order",
+        verbose_name="Замовлення",
     )
     stage = models.ForeignKey(
         "manufacture.ProductionStage",
@@ -159,24 +164,24 @@ class TelegramNotification(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        verbose_name="Production stage",
+        verbose_name="Виробничий етап",
     )
     status = models.CharField(
-        "Status",
+        "Статус",
         max_length=16,
         choices=Status.choices,
         default=Status.PENDING,
         db_index=True,
     )
-    scheduled_for = models.DateTimeField("Scheduled for", default=timezone.now, db_index=True)
-    sent_at = models.DateTimeField("Sent at", null=True, blank=True)
-    delivery_attempts = models.PositiveIntegerField("Delivery attempts", default=0)
-    error_message = models.TextField("Error message", blank=True)
-    created_at = models.DateTimeField("Created at", auto_now_add=True)
+    scheduled_for = models.DateTimeField("Заплановано на", default=timezone.now, db_index=True)
+    sent_at = models.DateTimeField("Надіслано", null=True, blank=True)
+    delivery_attempts = models.PositiveIntegerField("Спроб доставки", default=0)
+    error_message = models.TextField("Текст помилки", blank=True)
+    created_at = models.DateTimeField("Створено", auto_now_add=True)
 
     class Meta:
-        verbose_name = "Telegram notification"
-        verbose_name_plural = "Telegram notifications"
+        verbose_name = "Telegram-сповіщення"
+        verbose_name_plural = "Telegram-сповіщення"
         ordering = ("scheduled_for", "id")
 
     def __str__(self):
@@ -185,34 +190,34 @@ class TelegramNotification(models.Model):
 
 class ChangeAuditLog(models.Model):
     class EntityType(models.TextChoices):
-        ORDER = "order", "Order"
-        TASK = "task", "Task"
-        PRODUCTION_STAGE = "production_stage", "Production stage"
-        PRODUCTION_SLOT = "production_slot", "Production slot"
+        ORDER = "order", "Замовлення"
+        TASK = "task", "Задача"
+        PRODUCTION_STAGE = "production_stage", "Виробничий етап"
+        PRODUCTION_SLOT = "production_slot", "Виробничий слот"
 
     class Action(models.TextChoices):
-        CREATED = "created", "Created"
-        UPDATED = "updated", "Updated"
-        DELETED = "deleted", "Deleted"
+        CREATED = "created", "Створено"
+        UPDATED = "updated", "Оновлено"
+        DELETED = "deleted", "Видалено"
 
     entity_type = models.CharField(
-        "Entity type",
+        "Тип сутності",
         max_length=32,
         choices=EntityType.choices,
         db_index=True,
     )
     action = models.CharField(
-        "Action",
+        "Дія",
         max_length=16,
         choices=Action.choices,
         db_index=True,
     )
-    object_id = models.PositiveBigIntegerField("Object ID", db_index=True)
-    object_label = models.CharField("Object label", max_length=255, blank=True)
-    changed_fields = models.JSONField("Changed fields", default=list, blank=True)
-    snapshot_before = models.JSONField("Before", default=dict, blank=True)
-    snapshot_after = models.JSONField("After", default=dict, blank=True)
-    note = models.CharField("Note", max_length=255, blank=True)
+    object_id = models.PositiveBigIntegerField("ID об’єкта", db_index=True)
+    object_label = models.CharField("Назва об’єкта", max_length=255, blank=True)
+    changed_fields = models.JSONField("Змінені поля", default=list, blank=True)
+    snapshot_before = models.JSONField("Було", default=dict, blank=True)
+    snapshot_after = models.JSONField("Стало", default=dict, blank=True)
+    note = models.CharField("Примітка", max_length=255, blank=True)
     changed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         related_name="change_audit_logs",
@@ -220,7 +225,7 @@ class ChangeAuditLog(models.Model):
         null=True,
         blank=True,
         db_constraint=False,
-        verbose_name="Changed by",
+        verbose_name="Хто змінив",
     )
     order = models.ForeignKey(
         "crm.Order",
@@ -229,7 +234,7 @@ class ChangeAuditLog(models.Model):
         null=True,
         blank=True,
         db_constraint=False,
-        verbose_name="Order",
+        verbose_name="Замовлення",
     )
     task = models.ForeignKey(
         "crm.Task",
@@ -238,7 +243,7 @@ class ChangeAuditLog(models.Model):
         null=True,
         blank=True,
         db_constraint=False,
-        verbose_name="Task",
+        verbose_name="Задача",
     )
     stage = models.ForeignKey(
         "manufacture.ProductionStage",
@@ -247,7 +252,7 @@ class ChangeAuditLog(models.Model):
         null=True,
         blank=True,
         db_constraint=False,
-        verbose_name="Production stage",
+        verbose_name="Виробничий етап",
     )
     slot = models.ForeignKey(
         "manufacture.ProductionSlot",
@@ -256,13 +261,13 @@ class ChangeAuditLog(models.Model):
         null=True,
         blank=True,
         db_constraint=False,
-        verbose_name="Production slot",
+        verbose_name="Виробничий слот",
     )
-    created_at = models.DateTimeField("Created at", auto_now_add=True, db_index=True)
+    created_at = models.DateTimeField("Створено", auto_now_add=True, db_index=True)
 
     class Meta:
-        verbose_name = "Change audit log"
-        verbose_name_plural = "Change audit logs"
+        verbose_name = "Журнал змін"
+        verbose_name_plural = "Журнал змін"
         ordering = ("-created_at", "-id")
 
     def __str__(self):

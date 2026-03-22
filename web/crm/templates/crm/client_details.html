@@ -1,9 +1,10 @@
 {% extends "crm/workspace_base.html" %}
+{% load core_display %}
 
 {% block title %}{{ client.name }}{% endblock %}
-{% block eyebrow %}Client workspace{% endblock %}
+{% block eyebrow %}Картка клієнта{% endblock %}
 {% block hero_title %}{{ client.name }}{% endblock %}
-{% block hero_text %}Контакти, замовлення, задачі та дії по поточному клієнту.{% endblock %}
+{% block hero_text %}Контакти, замовлення, задачі, історія взаємодії та дії по поточному клієнту.{% endblock %}
 
 {% block crm_extra_head %}
     <style>
@@ -20,6 +21,7 @@
         }
 
         .action-row a,
+        .action-row button,
         .action-row span {
             min-height: 28px;
             padding: 4px 8px;
@@ -28,6 +30,18 @@
             text-decoration: none;
             background: var(--surface-muted);
             color: var(--ink);
+            font: inherit;
+        }
+
+        .link-row button {
+            min-height: 28px;
+            padding: 4px 8px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--surface-muted);
+            color: var(--ink);
+            font: inherit;
+            cursor: pointer;
         }
 
         .action-row .disabled {
@@ -80,12 +94,62 @@
             color: var(--muted);
         }
 
+        .timeline-list {
+            display: grid;
+            gap: 8px;
+        }
+
+        .timeline-card {
+            display: grid;
+            gap: 8px;
+        }
+
+        .timeline-head,
+        .timeline-meta,
+        .timeline-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .timeline-head h3,
+        .timeline-head p {
+            margin: 0;
+        }
+
+        .timeline-body {
+            margin: 0;
+            color: var(--muted);
+            white-space: pre-line;
+        }
+
         @media (max-width: 980px) {
             .card-grid {
                 grid-template-columns: 1fr;
             }
         }
     </style>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script>
+        (() => {
+            document.querySelectorAll("[data-copy-text]").forEach((button) => {
+                button.addEventListener("click", async () => {
+                    try {
+                        await navigator.clipboard.writeText(button.dataset.copyText || "");
+                        button.textContent = "Скопійовано";
+                        window.setTimeout(() => {
+                            button.textContent = "Запит доставки";
+                        }, 1200);
+                    } catch (error) {
+                        window.alert("Не вдалося скопіювати текст.");
+                    }
+                });
+            });
+        })();
+    </script>
 {% endblock %}
 
 {% block hero_stats %}
@@ -102,6 +166,10 @@
         <span>Відкриті задачі</span>
     </div>
     <div class="chip">
+        <strong>{{ stats.interactions_count }}</strong>
+        <span>Події в історії</span>
+    </div>
+    <div class="chip">
         <strong>{{ stats.revenue_total|floatformat:2 }}</strong>
         <span>Сума замовлень</span>
     </div>
@@ -109,7 +177,7 @@
 
 {% block content %}
     <section class="panel">
-        <span class="eyebrow">Client details</span>
+        <span class="eyebrow">Дані клієнта</span>
         <h2>Основні дані</h2>
         <p class="section-copy">
             Тип: {{ client.get_client_type_display }}.
@@ -127,7 +195,7 @@
                 <strong>{{ client.phones|default:"—" }}</strong>
             </div>
             <div class="info-block">
-                <span class="eyebrow">Email</span>
+                <span class="eyebrow">Електронна пошта</span>
                 <strong>{{ client.email|default:"—" }}</strong>
             </div>
             <div class="info-block">
@@ -166,11 +234,58 @@
             {% if task_add_url %}
                 <a href="{{ task_add_url }}">Швидко створити задачу</a>
             {% endif %}
+            {% if interaction_add_url %}
+                <a href="{{ interaction_add_url }}">Додати запис в історію</a>
+            {% endif %}
         </div>
     </section>
 
     <section class="panel">
-        <span class="eyebrow">Contacts</span>
+        <span class="eyebrow">Хронологія</span>
+        <h2>Історія взаємодії</h2>
+        {% if interactions %}
+            <div class="timeline-list">
+                {% for interaction in interactions %}
+                    <article class="item-card timeline-card">
+                        <div class="timeline-head">
+                            <h3>{{ interaction.title }}</h3>
+                            <span class="pill {{ interaction.source_tone }}">{{ interaction.get_source_display }}</span>
+                            <span class="pill">{{ interaction.get_event_type_display }}</span>
+                        </div>
+                        <div class="timeline-meta">
+                            <span>{{ interaction.event_at|date:"d.m.Y H:i" }}</span>
+                            {% if interaction.created_by %}
+                                <span>Зафіксував: {{ interaction.created_by|user_display }}</span>
+                            {% endif %}
+                            {% if interaction.contact %}
+                                <span>Контакт: {{ interaction.contact.full_name }}</span>
+                            {% endif %}
+                        </div>
+                        {% if interaction.description %}
+                            <p class="timeline-body">{{ interaction.description|linebreaksbr }}</p>
+                        {% endif %}
+                        <div class="timeline-links">
+                            {% if interaction.order_url %}
+                                <a href="{{ interaction.order_url }}">Замовлення</a>
+                            {% elif interaction.order %}
+                                <span>Замовлення: {{ interaction.order.title|default:"Замовлення" }}</span>
+                            {% endif %}
+                            {% if interaction.task_url %}
+                                <a href="{{ interaction.task_url }}">Задача</a>
+                            {% elif interaction.task %}
+                                <span>Задача: {{ interaction.task.title }}</span>
+                            {% endif %}
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="empty">Подій по цьому клієнту ще немає. Додайте ручний запис або зафіксуйте роботу через задачі, замовлення та виробництво.</p>
+        {% endif %}
+    </section>
+
+    <section class="panel">
+        <span class="eyebrow">Контакти</span>
         <h2>Список контактів</h2>
         {% if contacts %}
             <div class="card-grid">
@@ -208,7 +323,7 @@
     </section>
 
     <section class="panel">
-        <span class="eyebrow">Orders</span>
+        <span class="eyebrow">Замовлення</span>
         <h2>Список замовлень</h2>
         {% if orders %}
             <div class="table-wrap">
@@ -237,7 +352,7 @@
                                 {% endif %}
                             </td>
                             <td>{{ order.contact.full_name }}</td>
-                            <td>{% if order.manager %}{{ order.manager.email|default:order.manager.username }}{% else %}—{% endif %}</td>
+                            <td>{% if order.manager %}{{ order.manager|user_display }}{% else %}—{% endif %}</td>
                             <td>{{ order.get_status_display }}</td>
                             <td>{{ order.deadline|date:"d.m.Y"|default:"—" }}</td>
                             <td>{{ order.items_total|floatformat:2 }}</td>
@@ -246,6 +361,7 @@
                                     {% if order.edit_url %}
                                         <a href="{{ order.edit_url }}">Редагувати</a>
                                     {% endif %}
+                                    <button type="button" data-copy-text="{{ order.delivery_request_text|escapejs }}">Запит доставки</button>
                                     {% if order.delete_url %}
                                         <a href="{{ order.delete_url }}">Видалити</a>
                                     {% endif %}
@@ -262,7 +378,7 @@
     </section>
 
     <section class="panel">
-        <span class="eyebrow">Tasks</span>
+        <span class="eyebrow">Задачі</span>
         <h2>Список задач</h2>
         {% if tasks %}
             <div class="mini-list">
@@ -271,6 +387,7 @@
                         <h3>{% if task.edit_url %}<a href="{{ task.edit_url }}">{{ task.title }}</a>{% else %}{{ task.title }}{% endif %}</h3>
                         <p class="meta-line">
                             {{ task.date|date:"d.m.Y" }}
+                            <span class="pill {{ task.priority_tone }}">{{ task.get_priority_display }}</span>
                             <span class="pill {{ task.status_tone }}">{{ task.get_status_display }}</span>
                             {% if task.is_overdue %}
                                 <span class="pill overdue">прострочено</span>
@@ -292,10 +409,13 @@
                                 {% endif %}
                             </p>
                         {% endif %}
-                        <p>Ким створено: {% if task.assigned_by %}{{ task.assigned_by.email|default:task.assigned_by.username }}{% else %}—{% endif %}</p>
-                        <p>Відповідальний: {% if task.assigned_to %}{{ task.assigned_to.email|default:task.assigned_to.username }}{% else %}—{% endif %}</p>
+                        <p>Ким створено: {% if task.assigned_by %}{{ task.assigned_by|user_display }}{% else %}—{% endif %}</p>
+                        <p>Відповідальний: {% if task.assigned_to %}{{ task.assigned_to|user_display }}{% else %}—{% endif %}</p>
+                        {% if task.description %}
+                            <p>{{ task.description }}</p>
+                        {% endif %}
                         {% if task.comment %}
-                            <p class="meta-line">{{ task.comment }}</p>
+                            <p class="meta-line">Коментар: {{ task.comment }}</p>
                         {% endif %}
                         <div class="action-row">
                             {% if task.edit_url %}

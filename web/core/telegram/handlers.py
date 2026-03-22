@@ -4,8 +4,10 @@ from core.models import TelegramUpdateLog
 
 from .api import TelegramAPIError, answer_callback_query, edit_message_text, get_updates, send_message
 from .services import (
+    build_help_response,
     build_home_response,
     build_orders_response,
+    build_profile_response,
     build_tasks_response,
     get_profile_by_chat_id,
     link_profile_to_chat,
@@ -42,20 +44,30 @@ def _send_home(chat_id, profile):
     send_message(chat_id, text, reply_markup=reply_markup)
 
 
+def _send_help(chat_id, profile=None):
+    text, reply_markup = build_help_response(profile)
+    send_message(chat_id, text, reply_markup=reply_markup)
+
+
+def _send_profile(chat_id, profile):
+    text, reply_markup = build_profile_response(profile)
+    send_message(chat_id, text, reply_markup=reply_markup)
+
+
 def _handle_link_command(chat_id, username, raw_code):
     profile = link_profile_to_chat(raw_code, chat_id, username=username)
     if profile:
         _send_home(chat_id, profile)
         return "processed", ""
-    send_message(chat_id, "Link code not found. Open your account in CRM and use the current Telegram code.")
-    return "ignored", "Invalid Telegram link code."
+    send_message(chat_id, "Код прив’язки не знайдено. Відкрийте свій акаунт у CRM і використайте актуальний Telegram-код.")
+    return "ignored", "Некоректний код прив’язки Telegram."
 
 
 def _handle_message(update):
     message = update.get("message") or {}
     text = (message.get("text") or "").strip()
     if not text:
-        return "ignored", "Message does not contain text."
+        return "ignored", "Повідомлення не містить тексту."
 
     sender = _extract_sender(update)
     chat_id = sender["chat_id"]
@@ -71,7 +83,7 @@ def _handle_message(update):
         if profile:
             _send_home(chat_id, profile)
         else:
-            send_message(chat_id, "Use /link CODE to connect this chat with your CRM account.")
+            _send_help(chat_id)
         return "processed", ""
 
     if command == "/link":
@@ -80,15 +92,15 @@ def _handle_message(update):
     if command == "/unlink":
         profile = unlink_profile_by_chat(chat_id)
         if profile:
-            send_message(chat_id, "Telegram chat disconnected from CRM.")
+            send_message(chat_id, "Telegram-чат від’єднано від CRM.")
             return "processed", ""
-        send_message(chat_id, "This chat is not linked to a CRM account.")
-        return "ignored", "Chat is not linked."
+        send_message(chat_id, "Цей чат не прив’язаний до акаунта CRM.")
+        return "ignored", "Чат не прив’язаний."
 
     profile = get_profile_by_chat_id(chat_id)
     if not profile:
-        send_message(chat_id, "This chat is not linked. Use /link CODE from your CRM account.")
-        return "ignored", "Chat is not linked."
+        send_message(chat_id, "Цей чат не прив’язаний. Використайте /link КОД зі свого акаунта CRM.")
+        return "ignored", "Чат не прив’язаний."
 
     if command == "/tasks":
         text, reply_markup = build_tasks_response(profile, scope="open", page_number=1)
@@ -100,8 +112,16 @@ def _handle_message(update):
         send_message(chat_id, text, reply_markup=reply_markup)
         return "processed", ""
 
+    if command == "/me":
+        _send_profile(chat_id, profile)
+        return "processed", ""
+
+    if command == "/help":
+        _send_help(chat_id, profile)
+        return "processed", ""
+
     _send_home(chat_id, profile)
-    return "ignored", f"Unsupported command: {command}"
+    return "ignored", f"Непідтримувана команда: {command}"
 
 
 def _handle_callback(update):
@@ -112,16 +132,20 @@ def _handle_callback(update):
     message = callback.get("message") or {}
     profile = get_profile_by_chat_id(chat_id)
     if not profile:
-        answer_callback_query(callback.get("id"), text="Chat is not linked.")
-        return "ignored", "Chat is not linked."
+        answer_callback_query(callback.get("id"), text="Чат не прив’язаний.")
+        return "ignored", "Чат не прив’язаний."
 
     if data == "home":
         text, reply_markup = build_home_response(profile)
+    elif data == "profile":
+        text, reply_markup = build_profile_response(profile)
+    elif data == "help":
+        text, reply_markup = build_help_response(profile)
     else:
         parts = data.split(":")
         if len(parts) != 3 or parts[0] not in {"tasks", "orders"}:
-            answer_callback_query(callback.get("id"), text="Unknown action.")
-            return "ignored", "Unknown callback payload."
+            answer_callback_query(callback.get("id"), text="Невідома дія.")
+            return "ignored", "Невідомий callback payload."
         target, scope, page_raw = parts
         page = int(page_raw) if page_raw.isdigit() else 1
         text, reply_markup = _render_browser(profile, target, scope, page)
@@ -160,7 +184,7 @@ def process_update(update):
         elif "message" in update:
             status, error_message = _handle_message(update)
         else:
-            status, error_message = "ignored", "Unsupported update type."
+            status, error_message = "ignored", "Непідтримуваний тип оновлення."
         log.chat_id = sender["chat_id"]
         log.username = sender["username"]
         log.update_type = _message_type(update)

@@ -1,9 +1,10 @@
 {% extends "crm/workspace_base.html" %}
+{% load core_display %}
 
 {% block title %}Задачі{% endblock %}
-{% block eyebrow %}CRM tasks{% endblock %}
+{% block eyebrow %}CRM · задачі{% endblock %}
 {% block hero_title %}Задачі по CRM{% endblock %}
-{% block hero_text %}Список задач з фільтрами, статусами та переходом у kanban.{% endblock %}
+{% block hero_text %}Список задач з фільтрами, статусами та переходом у канбан-дошку.{% endblock %}
 
 {% block hero_stats %}
     <div class="chip">
@@ -37,12 +38,21 @@
         <div class="toolbar">
             <form method="get" class="search-form">
                 <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві, коментарю, клієнту, контакту, замовленню">
+                <select name="assigned_by">
+                    <option value="">Призначив будь-хто</option>
+                    <option value="mine"{% if selected_assigned_by == "mine" %} selected{% endif %}>Призначені мною</option>
+                    {% for user_option in assigned_by_options %}
+                        <option value="{{ user_option.id }}"{% if selected_assigned_by == user_option.id|stringformat:"s" %} selected{% endif %}>
+                            {{ user_option|user_display }}
+                        </option>
+                    {% endfor %}
+                </select>
                 <select name="assigned_to">
                     <option value="">Усі відповідальні</option>
                     <option value="mine"{% if selected_assigned_to == "mine" %} selected{% endif %}>Мої задачі</option>
                     {% for user_option in assigned_to_options %}
                         <option value="{{ user_option.id }}"{% if selected_assigned_to == user_option.id|stringformat:"s" %} selected{% endif %}>
-                            {{ user_option.email|default:user_option.username }}
+                            {{ user_option|user_display }}
                         </option>
                     {% endfor %}
                 </select>
@@ -77,7 +87,7 @@
                 <a href="{% url 'crm_tasks' %}">Скинути</a>
             </form>
             <div class="link-row">
-                <a href="{{ task_kanban_url }}">Kanban</a>
+                <a href="{{ task_kanban_url }}">Канбан</a>
                 {% if task_add_url %}
                     <a href="{{ task_add_url }}">Нова задача</a>
                 {% endif %}
@@ -86,7 +96,7 @@
     </section>
 
     <section class="panel">
-        <span class="eyebrow">Tasks</span>
+        <span class="eyebrow">Задачі</span>
         <h2>Список задач</h2>
         {% if tasks %}
             <div class="mini-list">
@@ -99,11 +109,15 @@
                                 · {{ task.contact.full_name }}
                             {% endif %}
                             · {{ task.date|date:"d.m.Y" }}
+                            <span class="pill {{ task.priority_tone }}">{{ task.get_priority_display }}</span>
                             <span class="pill {{ task.status_tone }}">{{ task.get_status_display }}</span>
                             {% if task.is_overdue %}
                                 <span class="pill overdue">прострочено</span>
                             {% endif %}
                         </p>
+                        {% if task.description %}
+                            <p>{{ task.description }}</p>
+                        {% endif %}
                         {% if task.order_id %}
                             <p>
                                 Замовлення:
@@ -114,10 +128,10 @@
                                 {% endif %}
                             </p>
                         {% endif %}
-                        <p>Ким створено: {% if task.assigned_by %}{{ task.assigned_by.email|default:task.assigned_by.username }}{% else %}—{% endif %}</p>
-                        <p>Відповідальний: {% if task.assigned_to %}{{ task.assigned_to.email|default:task.assigned_to.username }}{% else %}—{% endif %}</p>
+                        <p>Ким створено: {% if task.assigned_by %}{{ task.assigned_by|user_display }}{% else %}—{% endif %}</p>
+                        <p>Відповідальний: {% if task.assigned_to %}{{ task.assigned_to|user_display }}{% else %}—{% endif %}</p>
                         {% if task.comment %}
-                            <p class="meta-line">{{ task.comment }}</p>
+                            <p class="meta-line">Коментар: {{ task.comment }}</p>
                         {% endif %}
                         <div class="link-row">
                             {% if task.edit_url %}
