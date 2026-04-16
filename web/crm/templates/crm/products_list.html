@@ -12,16 +12,20 @@
         <span>Усього продуктів</span>
     </div>
     <div class="chip">
-        <strong>{{ stats.active_products }}</strong>
-        <span>Активні</span>
+        <strong>{{ stats.tracked_products }}</strong>
+        <span>Зі складським обліком</span>
     </div>
     <div class="chip">
-        <strong>{{ stats.inactive_products }}</strong>
-        <span>Неактивні</span>
+        <strong>{{ stats.materials_count }}</strong>
+        <span>Матеріали</span>
     </div>
     <div class="chip">
         <strong>{{ stats.used_in_orders }}</strong>
         <span>Використані в замовленнях</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.deficit_products }}</strong>
+        <span>Дефіцит</span>
     </div>
 {% endblock %}
 
@@ -32,9 +36,17 @@
                 <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві, артикулу, опису">
                 <button type="submit">Знайти</button>
             </form>
-            {% if product_add_url %}
-                <a href="{{ product_add_url }}">Новий продукт</a>
-            {% endif %}
+            <div class="link-row">
+                {% if inventory_url %}
+                    <a href="{{ inventory_url }}">Склад</a>
+                {% endif %}
+                {% if materials_url %}
+                    <a href="{{ materials_url }}">Матеріали</a>
+                {% endif %}
+                {% if product_add_url %}
+                    <a href="{{ product_add_url }}">Новий продукт</a>
+                {% endif %}
+            </div>
         </div>
     </section>
 
@@ -42,24 +54,59 @@
         <span class="eyebrow">Продукти</span>
         <h2>Список продуктів</h2>
         {% if products %}
-            <div class="card-grid">
-                {% for product in products %}
-                    <article class="item-card">
-                        <h3>{% if product.edit_url %}<a href="{{ product.edit_url }}">{{ product.name }}</a>{% else %}{{ product.name }}{% endif %}</h3>
-                        <p class="meta-line">{% if product.sku %}{{ product.sku }}{% else %}Без артикулу{% endif %}</p>
-                        <p>Базова ціна: {% if product.base_price %}{{ product.base_price|floatformat:2 }}{% else %}—{% endif %}</p>
-                        <p class="meta-line">В позиціях замовлень: {{ product.order_items_count }}</p>
-                        <p class="meta-line">{% if product.is_active %}Активний{% else %}Неактивний{% endif %}</p>
-                        <div class="link-row">
-                            {% if product.edit_url %}
-                                <a href="{{ product.edit_url }}">Редагувати</a>
-                            {% endif %}
-                            {% if product.delete_url %}
-                                <a href="{{ product.delete_url }}">Видалити</a>
-                            {% endif %}
-                        </div>
-                    </article>
-                {% endfor %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Продукт</th>
+                        <th>Склад</th>
+                        <th>Специфікація</th>
+                        <th>Замовлення</th>
+                        <th>Дії</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for product in products %}
+                        <tr>
+                            <td>
+                                <strong><a href="{{ product.details_url }}">{{ product.name }}</a></strong>
+                                <p class="meta-line">
+                                    {% if product.sku %}{{ product.sku }}{% else %}Без артикулу{% endif %}
+                                    {% if product.unit %} · {{ product.unit }}{% endif %}
+                                </p>
+                                <p class="meta-line">
+                                    {% if product.track_inventory %}Складський облік{% else %}Без складського обліку{% endif %}
+                                    {% if product.is_material %} · Матеріал{% endif %}
+                                </p>
+                            </td>
+                            <td>
+                                <strong>{{ product.available_quantity|floatformat:3 }}</strong>
+                                <p class="meta-line">Залишок: {{ product.total_quantity|floatformat:3 }}</p>
+                                <p class="meta-line">Резерв: {{ product.total_reserved|floatformat:3 }}</p>
+                                {% if product.is_below_min_stock %}
+                                    <span class="pill critical">Дефіцит</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <strong>{{ product.bom_count }}</strong>
+                                <p class="meta-line">матеріалів у специфікації</p>
+                            </td>
+                            <td>{{ product.order_items_count }}</td>
+                            <td>
+                                <div class="link-row">
+                                    <a href="{{ product.details_url }}">Картка</a>
+                                    {% if product.edit_url %}
+                                        <a href="{{ product.edit_url }}">Редагувати</a>
+                                    {% endif %}
+                                    {% if product.delete_url %}
+                                        <a href="{{ product.delete_url }}">Видалити</a>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
             </div>
         {% else %}
             <p class="empty">Продукти за цим фільтром не знайдено.</p>

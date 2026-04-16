@@ -1,0 +1,120 @@
+{% extends "crm/workspace_base.html" %}
+{% load core_display %}
+
+{% block title %}Матеріали{% endblock %}
+{% block eyebrow %}CRM · матеріали{% endblock %}
+{% block hero_title %}Реєстр матеріалів{% endblock %}
+{% block hero_text %}Окремий облік сировини, комплектуючих і витратних позицій: фанера, болти, гайки, кріплення та інші матеріали.{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ stats.total_materials }}</strong>
+        <span>Усього матеріалів</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.tracked_materials }}</strong>
+        <span>Зі складським обліком</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.used_in_specs }}</strong>
+        <span>У специфікаціях</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.deficit_materials }}</strong>
+        <span>Дефіцит</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.movement_materials }}</strong>
+        <span>З рухом по складу</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <div class="toolbar">
+            <form method="get" class="search-form">
+                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві, артикулу, опису">
+                <button type="submit">Знайти</button>
+            </form>
+            <div class="link-row">
+                {% if inventory_url %}
+                    <a href="{{ inventory_url }}">Склад матеріалів</a>
+                {% endif %}
+                {% if products_url %}
+                    <a href="{{ products_url }}">Усі продукти</a>
+                {% endif %}
+                {% if inventory_receipt_url %}
+                    <a href="{{ inventory_receipt_url }}">Прихід за накладною</a>
+                {% endif %}
+                {% if material_add_url %}
+                    <a href="{{ material_add_url }}">Новий матеріал</a>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <section class="panel">
+        <span class="eyebrow">Матеріали</span>
+        <h2>Список матеріалів</h2>
+        {% if materials %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Матеріал</th>
+                        <th>Залишок</th>
+                        <th>У специфікаціях</th>
+                        <th>Рух / резерв</th>
+                        <th>Дії</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for material in materials %}
+                        <tr>
+                            <td>
+                                <strong><a href="{{ material.details_url }}">{{ material.name }}</a></strong>
+                                <p class="meta-line">
+                                    {% if material.sku %}{{ material.sku }}{% else %}Без артикулу{% endif %}
+                                    {% if material.unit %} · {{ material.unit }}{% endif %}
+                                </p>
+                                <p class="meta-line">
+                                    {% if material.track_inventory %}Складський облік{% else %}Без складського обліку{% endif %}
+                                </p>
+                            </td>
+                            <td>
+                                <strong>{{ material.available_quantity|floatformat:3 }}</strong>
+                                <p class="meta-line">Залишок: {{ material.total_quantity|floatformat:3 }}</p>
+                                <p class="meta-line">Резерв: {{ material.total_reserved|floatformat:3 }}</p>
+                                {% if material.is_below_min_stock %}
+                                    <span class="pill critical">Дефіцит</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <strong>{{ material.used_in_specs_count }}</strong>
+                                <p class="meta-line">продуктів використовують матеріал</p>
+                            </td>
+                            <td>
+                                <strong>{{ material.order_items_count }}</strong>
+                                <p class="meta-line">операцій із замовленнями</p>
+                            </td>
+                            <td>
+                                <div class="link-row">
+                                    <a href="{{ material.details_url }}">Картка</a>
+                                    {% if material.edit_url %}
+                                        <a href="{{ material.edit_url }}">Редагувати</a>
+                                    {% endif %}
+                                    {% if material.delete_url %}
+                                        <a href="{{ material.delete_url }}">Видалити</a>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="empty">Матеріали за цим фільтром не знайдено.</p>
+        {% endif %}
+    </section>
+{% endblock %}

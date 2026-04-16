@@ -358,6 +358,7 @@ class TestSalesDashboard(DashboardTestMixin, TestCase):
         self.assertContains(response, "Замовлення")
         self.assertContains(response, reverse("crm_tasks_kanban"))
         self.assertContains(response, my_order.title)
+        self.assertContains(response, reverse("crm_order_update", args=[my_order.id]))
         self.assertEqual(len(response.context["nearest_deadlines"]), 1)
 
 

@@ -8,6 +8,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from core.visibility import filter_orders_queryset, filter_stages_queryset
+from crm.inventory import can_plan_stage
 
 from .models import (
     DEFAULT_WORKDAY_END,
@@ -323,6 +324,13 @@ def build_stage_row(stage, *, now=None):
         overdue_seconds = max((now - stage.started_at).total_seconds(), 0)
         overdue_reason = "stalled"
 
+    can_plan, material_status, material_rows = can_plan_stage(stage)
+    material_status_meta = {
+        "ok": ("Матеріали є", "healthy"),
+        "partial": ("Частково", "warning"),
+        "none": ("Немає", "critical"),
+    }.get(material_status, ("Невідомо", "warning"))
+
     return {
         "stage": stage,
         "slot": slot,
@@ -338,6 +346,12 @@ def build_stage_row(stage, *, now=None):
         "overdue_reason": overdue_reason,
         "is_overdue": overdue_seconds > 0,
         "is_terminal": is_terminal,
+        "can_plan": can_plan,
+        "material_status": material_status,
+        "material_status_label": material_status_meta[0],
+        "material_status_tone": material_status_meta[1],
+        "material_rows": material_rows,
+        "material_shortage_count": sum(1 for row in material_rows if row["shortage"] > 0),
     }
 
 
@@ -996,7 +1010,7 @@ def _stage_has_fixed_schedule(stage):
     return stage.slots.filter(Q(planning_mode=ProductionSlot.PlanningMode.MANUAL) | Q(is_locked=True)).exists()
 
 
-def _ensure_stage_blocked(stage):
+def _ensure_stage_blocked(stage, *, comment=""):
     changed_fields = []
     if stage.planned_start is not None:
         stage.planned_start = None
@@ -1007,6 +1021,9 @@ def _ensure_stage_blocked(stage):
     if stage.status != ProductionStage.Status.BLOCKED:
         stage.status = ProductionStage.Status.BLOCKED
         changed_fields.append("status")
+    if comment and stage.comment != comment:
+        stage.comment = comment
+        changed_fields.append("comment")
     if changed_fields:
         stage.save(update_fields=changed_fields + ["updated_at"])
 
@@ -1015,6 +1032,22 @@ def _schedule_stage(stage, start_from):
     if _stage_has_fixed_schedule(stage):
         sync_stage_schedule_from_slots(stage, save=True)
         return get_stage_effective_end(stage) or start_from
+
+    can_plan, material_status, material_rows = can_plan_stage(stage)
+    if not can_plan:
+        ProductionSlot.objects.filter(
+            stage=stage,
+            planning_mode=ProductionSlot.PlanningMode.AUTO,
+            is_locked=False,
+        ).delete()
+        shortage_names = ", ".join(row["material_name"] for row in material_rows if row["shortage"] > 0)
+        block_reason = "Немає матеріалів для планування."
+        if material_status == "partial":
+            block_reason = "Матеріалів недостатньо для повного запуску."
+        if shortage_names:
+            block_reason = f"{block_reason} Дефіцит: {shortage_names}."
+        _ensure_stage_blocked(stage, comment=block_reason)
+        return start_from
 
     duration = estimate_stage_duration(stage)
     best_choice = None

@@ -1,0 +1,159 @@
+{% extends "crm/workspace_base.html" %}
+{% load core_display %}
+
+{% block title %}Склад{% endblock %}
+{% block eyebrow %}CRM · склад{% endblock %}
+{% block hero_title %}Склад{% endblock %}
+{% block hero_text %}Залишки, резерви, дефіцит і рух товарів по складах.{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ stats.product_count }}</strong>
+        <span>Продуктів у звіті</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.deficit_count }}</strong>
+        <span>Дефіцит</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.transaction_count }}</strong>
+        <span>Операцій</span>
+    </div>
+    <div class="chip">
+        <strong>{{ stats.tracked_count }}</strong>
+        <span>Зі складським обліком</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <div class="toolbar">
+            <form method="get" class="search-form">
+                <input type="search" name="q" value="{{ search }}" placeholder="Пошук по назві або артикулу">
+                <select name="product_kind">
+                    {% for value, label in product_kind_choices %}
+                        <option value="{{ value }}"{% if product_kind == value %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <select name="warehouse_type">
+                    <option value="">Усі склади</option>
+                    {% for value, label in warehouse_type_choices %}
+                        <option value="{{ value }}"{% if warehouse_type == value %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <select name="shortage_only">
+                    <option value="0"{% if not shortage_only %} selected{% endif %}>Усі позиції</option>
+                    <option value="1"{% if shortage_only %} selected{% endif %}>Лише дефіцит</option>
+                </select>
+                <button type="submit">Застосувати</button>
+                <a href="{% url 'crm_inventory' %}">Скинути</a>
+            </form>
+            <div class="link-row">
+                {% if materials_url %}
+                    <a href="{{ materials_url }}">Матеріали</a>
+                {% endif %}
+                {% if materials_inventory_url %}
+                    <a href="{{ materials_inventory_url }}">Склад матеріалів</a>
+                {% endif %}
+                {% if inventory_receipt_url %}
+                    <a href="{{ inventory_receipt_url }}">Прихід за накладною</a>
+                {% endif %}
+            </div>
+            {% if inventory_operation_url %}
+                <a href="{{ inventory_operation_url }}">Нова операція</a>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="panel">
+        <span class="eyebrow">Залишки</span>
+        <h2>Баланс по товарах</h2>
+        {% if rows %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Продукт</th>
+                        <th>Залишок</th>
+                        <th>Резерв</th>
+                        <th>Доступно</th>
+                        <th>Мін. залишок</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td>
+                                <strong><a href="{% url 'crm_product_details' row.product.id %}">{{ row.product.name }}</a></strong>
+                                <p class="meta-line">{{ row.product.sku|default:"—" }} · {{ row.product.unit|default:"шт" }}</p>
+                            </td>
+                            <td>{{ row.total_quantity|floatformat:3 }}</td>
+                            <td>{{ row.total_reserved|floatformat:3 }}</td>
+                            <td>
+                                {{ row.available|floatformat:3 }}
+                                {% if row.is_deficit %}
+                                    <span class="pill critical">Дефіцит</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ row.product.min_stock_level|floatformat:3 }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="empty">За цим фільтром нічого не знайдено.</p>
+        {% endif %}
+    </section>
+
+    <section class="section-grid two-up">
+        <article class="panel">
+            <span class="eyebrow">Дефіцит</span>
+            <h2>Позиції з ризиком</h2>
+            {% if deficit_rows %}
+                <div class="mini-list">
+                    {% for row in deficit_rows %}
+                        <article class="item-card">
+                            <h3><a href="{% url 'crm_product_details' row.product.id %}">{{ row.product.name }}</a></h3>
+                            <p class="meta-line">Доступно: {{ row.available|floatformat:3 }} {{ row.product.unit|default:"шт" }}</p>
+                            <p class="meta-line">Мінімум: {{ row.product.min_stock_level|floatformat:3 }}</p>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="empty">Дефіцитних позицій зараз немає.</p>
+            {% endif %}
+        </article>
+
+        <article class="panel">
+            <span class="eyebrow">Рух</span>
+            <h2>Останні операції</h2>
+            {% if recent_transactions %}
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Тип</th>
+                            <th>Продукт</th>
+                            <th>Кількість</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in recent_transactions %}
+                            <tr>
+                                <td>{{ row.created_at|date:"d.m.Y H:i" }}</td>
+                                <td>{{ row.get_type_display }}</td>
+                                <td><a href="{% url 'crm_product_details' row.product_id %}">{{ row.product.name }}</a></td>
+                                <td>{{ row.quantity|floatformat:3 }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty">Операцій ще немає.</p>
+            {% endif %}
+        </article>
+    </section>
+{% endblock %}

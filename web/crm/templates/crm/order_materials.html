@@ -1,0 +1,108 @@
+{% extends "crm/workspace_base.html" %}
+{% load core_display %}
+
+{% block title %}Матеріали замовлення{% endblock %}
+{% block eyebrow %}CRM · матеріали замовлення{% endblock %}
+{% block hero_title %}Матеріали замовлення{% endblock %}
+{% block hero_text %}Потреба, резерв, списання і дефіцит по кожній позиції замовлення.{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ summary.item_count }}</strong>
+        <span>Матеріальних рядків</span>
+    </div>
+    <div class="chip">
+        <strong>{{ summary.shortage_items }}</strong>
+        <span>З дефіцитом</span>
+    </div>
+    <div class="chip">
+        <strong>{{ summary.reserved_items }}</strong>
+        <span>У резерві</span>
+    </div>
+    <div class="chip">
+        <strong>{{ summary.consumed_items }}</strong>
+        <span>Списано</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <div class="panel-head">
+            <div>
+                <span class="eyebrow">Замовлення</span>
+                <h2>{{ order.title|default:"Без назви" }}</h2>
+            </div>
+            <div class="link-row">
+                <a href="{{ order.client_url }}">Клієнт</a>
+                {% if order.edit_url %}
+                    <a href="{{ order.edit_url }}">Редагувати</a>
+                {% endif %}
+                {% if inventory_url %}
+                    <a href="{{ inventory_url }}">Склад</a>
+                {% endif %}
+            </div>
+        </div>
+        <p class="meta-line">
+            Контакт: {{ order.contact.full_name }}
+            {% if order.manager %} · Менеджер: {{ order.manager|user_display }}{% endif %}
+            {% if order.deadline %} · Дедлайн: {{ order.deadline|date:"d.m.Y" }}{% endif %}
+        </p>
+    </section>
+
+    {% if material_rows %}
+        {% for item in material_rows %}
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <span class="eyebrow">Позиція</span>
+                        <h2>{{ item.order_item.product.name }} × {{ item.order_item.quantity }}</h2>
+                    </div>
+                    <span class="pill {{ item.status_tone }}">{{ item.status_label }}</span>
+                </div>
+                {% if item.rows %}
+                    <div class="table-wrap">
+                        <table class="table">
+                            <thead>
+                            <tr>
+                                <th>Матеріал</th>
+                                <th>Потрібно</th>
+                                <th>Зарезервовано</th>
+                                <th>Списано</th>
+                                <th>Доступно</th>
+                                <th>Статус</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {% for row in item.rows %}
+                                <tr>
+                                    <td>
+                                        <a href="{% url 'crm_product_details' row.material_id %}">{{ row.material_name }}</a>
+                                        <p class="meta-line">{{ row.material_sku|default:"—" }}</p>
+                                    </td>
+                                    <td>{{ row.required }} {{ row.unit }}</td>
+                                    <td>{{ row.reserved }} {{ row.unit }}</td>
+                                    <td>{{ row.consumed }} {{ row.unit }}</td>
+                                    <td>{{ row.available }} {{ row.unit }}</td>
+                                    <td>
+                                        {% if row.is_enough %}
+                                            <span class="pill healthy">Ок</span>
+                                        {% else %}
+                                            <span class="pill critical">Бракує {{ row.shortage }} {{ row.unit }}</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="empty">Для цієї позиції не задано склад продукту.</p>
+                {% endif %}
+            </section>
+        {% endfor %}
+    {% else %}
+        <section class="panel">
+            <p class="empty">У замовленні ще немає позицій або матеріалів.</p>
+        </section>
+    {% endif %}
+{% endblock %}

@@ -113,6 +113,7 @@
                         <th>Клієнт</th>
                         <th>Менеджер</th>
                         <th>Статус</th>
+                        <th>Матеріали</th>
                         <th>Дедлайн</th>
                         <th>Сума</th>
                         <th>Дії</th>
@@ -140,10 +141,17 @@
                             <td><a href="{{ order.client_url }}">{{ order.contact.client.name }}</a></td>
                             <td>{% if order.manager %}{{ order.manager|user_display }}{% else %}—{% endif %}</td>
                             <td>{{ order.get_status_display }}</td>
+                            <td>
+                                <span class="pill {{ order.material_status_tone }}">{{ order.material_status_label }}</span>
+                                {% if order.has_reserved_materials %}
+                                    <p class="meta-line">Є резерв</p>
+                                {% endif %}
+                            </td>
                             <td>{{ order.deadline|date:"d.m.Y"|default:"—" }}</td>
                             <td>{{ order.items_total|floatformat:2 }}</td>
                             <td>
                                 <div class="link-row">
+                                    <a href="{{ order.materials_url }}">Матеріали</a>
                                     {% if order.edit_url %}
                                         <a href="{{ order.edit_url }}">Редагувати</a>
                                     {% endif %}

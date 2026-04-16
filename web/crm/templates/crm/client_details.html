@@ -240,49 +240,6 @@
         </div>
     </section>
 
-    <section class="panel">
-        <span class="eyebrow">Хронологія</span>
-        <h2>Історія взаємодії</h2>
-        {% if interactions %}
-            <div class="timeline-list">
-                {% for interaction in interactions %}
-                    <article class="item-card timeline-card">
-                        <div class="timeline-head">
-                            <h3>{{ interaction.title }}</h3>
-                            <span class="pill {{ interaction.source_tone }}">{{ interaction.get_source_display }}</span>
-                            <span class="pill">{{ interaction.get_event_type_display }}</span>
-                        </div>
-                        <div class="timeline-meta">
-                            <span>{{ interaction.event_at|date:"d.m.Y H:i" }}</span>
-                            {% if interaction.created_by %}
-                                <span>Зафіксував: {{ interaction.created_by|user_display }}</span>
-                            {% endif %}
-                            {% if interaction.contact %}
-                                <span>Контакт: {{ interaction.contact.full_name }}</span>
-                            {% endif %}
-                        </div>
-                        {% if interaction.description %}
-                            <p class="timeline-body">{{ interaction.description|linebreaksbr }}</p>
-                        {% endif %}
-                        <div class="timeline-links">
-                            {% if interaction.order_url %}
-                                <a href="{{ interaction.order_url }}">Замовлення</a>
-                            {% elif interaction.order %}
-                                <span>Замовлення: {{ interaction.order.title|default:"Замовлення" }}</span>
-                            {% endif %}
-                            {% if interaction.task_url %}
-                                <a href="{{ interaction.task_url }}">Задача</a>
-                            {% elif interaction.task %}
-                                <span>Задача: {{ interaction.task.title }}</span>
-                            {% endif %}
-                        </div>
-                    </article>
-                {% endfor %}
-            </div>
-        {% else %}
-            <p class="empty">Подій по цьому клієнту ще немає. Додайте ручний запис або зафіксуйте роботу через задачі, замовлення та виробництво.</p>
-        {% endif %}
-    </section>
 
     <section class="panel">
         <span class="eyebrow">Контакти</span>
@@ -334,6 +291,7 @@
                         <th>Контакт</th>
                         <th>Менеджер</th>
                         <th>Статус</th>
+                        <th>Матеріали</th>
                         <th>Дедлайн</th>
                         <th>Сума</th>
                         <th>Дії</th>
@@ -354,10 +312,17 @@
                             <td>{{ order.contact.full_name }}</td>
                             <td>{% if order.manager %}{{ order.manager|user_display }}{% else %}—{% endif %}</td>
                             <td>{{ order.get_status_display }}</td>
+                            <td>
+                                <span class="pill {{ order.material_status_tone }}">{{ order.material_status_label }}</span>
+                                {% if order.has_reserved_materials %}
+                                    <p class="meta-line">Є резерв</p>
+                                {% endif %}
+                            </td>
                             <td>{{ order.deadline|date:"d.m.Y"|default:"—" }}</td>
                             <td>{{ order.items_total|floatformat:2 }}</td>
                             <td>
                                 <div class="link-row">
+                                    <a href="{{ order.materials_url }}">Матеріали</a>
                                     {% if order.edit_url %}
                                         <a href="{{ order.edit_url }}">Редагувати</a>
                                     {% endif %}
@@ -430,6 +395,50 @@
             </div>
         {% else %}
             <p class="empty">Задач по цьому клієнту ще немає.</p>
+        {% endif %}
+    </section>
+
+    <section class="panel">
+        <span class="eyebrow">Хронологія</span>
+        <h2>Історія взаємодії</h2>
+        {% if interactions %}
+            <div class="timeline-list">
+                {% for interaction in interactions %}
+                    <article class="item-card timeline-card">
+                        <div class="timeline-head">
+                            <h3>{{ interaction.title }}</h3>
+                            <span class="pill {{ interaction.source_tone }}">{{ interaction.get_source_display }}</span>
+                            <span class="pill">{{ interaction.get_event_type_display }}</span>
+                        </div>
+                        <div class="timeline-meta">
+                            <span>{{ interaction.event_at|date:"d.m.Y H:i" }}</span>
+                            {% if interaction.created_by %}
+                                <span>Зафіксував: {{ interaction.created_by|user_display }}</span>
+                            {% endif %}
+                            {% if interaction.contact %}
+                                <span>Контакт: {{ interaction.contact.full_name }}</span>
+                            {% endif %}
+                        </div>
+                        {% if interaction.description %}
+                            <p class="timeline-body">{{ interaction.description|linebreaksbr }}</p>
+                        {% endif %}
+                        <div class="timeline-links">
+                            {% if interaction.order_url %}
+                                <a href="{{ interaction.order_url }}">Замовлення</a>
+                            {% elif interaction.order %}
+                                <span>Замовлення: {{ interaction.order.title|default:"Замовлення" }}</span>
+                            {% endif %}
+                            {% if interaction.task_url %}
+                                <a href="{{ interaction.task_url }}">Задача</a>
+                            {% elif interaction.task %}
+                                <span>Задача: {{ interaction.task.title }}</span>
+                            {% endif %}
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="empty">Подій по цьому клієнту ще немає. Додайте ручний запис або зафіксуйте роботу через задачі, замовлення та виробництво.</p>
         {% endif %}
     </section>
 {% endblock %}

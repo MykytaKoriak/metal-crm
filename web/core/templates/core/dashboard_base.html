@@ -291,6 +291,38 @@
             padding: 12px;
         }
 
+        .messages {
+            display: grid;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .message {
+            padding: 10px 12px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--surface);
+            font-size: 13px;
+        }
+
+        .message.success {
+            border-color: rgba(2, 122, 72, 0.2);
+            background: rgba(2, 122, 72, 0.06);
+            color: var(--ok);
+        }
+
+        .message.error {
+            border-color: rgba(180, 35, 24, 0.2);
+            background: rgba(180, 35, 24, 0.06);
+            color: var(--danger);
+        }
+
+        .message.warning {
+            border-color: rgba(181, 71, 8, 0.2);
+            background: rgba(181, 71, 8, 0.06);
+            color: var(--warning);
+        }
+
         .panel-head {
             display: flex;
             flex-wrap: wrap;
@@ -537,7 +569,7 @@
         </nav>
     </header>
 
-    {% if perms.crm.view_client or perms.crm.view_contact or perms.crm.view_order or perms.crm.view_task or perms.crm.view_product %}
+    {% if perms.crm.view_client or perms.crm.view_contact or perms.crm.view_order or perms.crm.view_task or perms.crm.view_product or perms.crm.view_inventorybalance %}
         <section class="menu-bar">
             <div class="menu-strip">
                 <span class="menu-label">Робоче меню</span>
@@ -556,6 +588,10 @@
                     {% endif %}
                     {% if perms.crm.view_product %}
                         <a href="{% url 'crm_products' %}" class="{% if crm_nav == 'products' %}active{% endif %}">Продукти</a>
+                        <a href="{% url 'crm_materials' %}" class="{% if crm_nav == 'materials' %}active{% endif %}">Матеріали</a>
+                    {% endif %}
+                    {% if perms.crm.view_inventorybalance %}
+                        <a href="{% url 'crm_inventory' %}" class="{% if crm_nav == 'inventory' %}active{% endif %}">Склад</a>
                     {% endif %}
                 </nav>
             </div>
@@ -605,6 +641,14 @@
             {% block hero_stats %}{% endblock %}
         </div>
     </section>
+
+    {% if messages %}
+        <section class="messages">
+            {% for message in messages %}
+                <div class="message{% if message.tags %} {{ message.tags }}{% endif %}">{{ message }}</div>
+            {% endfor %}
+        </section>
+    {% endif %}
 
     <main class="section-grid">
         {% block content %}{% endblock %}

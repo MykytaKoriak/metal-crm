@@ -1,0 +1,178 @@
+{% extends "crm/workspace_base.html" %}
+{% load core_display %}
+
+{% block title %}{{ product.name }}{% endblock %}
+{% block eyebrow %}CRM · продукт{% endblock %}
+{% block hero_title %}{{ product.name }}{% endblock %}
+{% block hero_text %}Картка продукту зі складом, рухом, специфікацією та використанням у виробництві.{% endblock %}
+
+{% block hero_stats %}
+    <div class="chip">
+        <strong>{{ product.available_quantity|floatformat:3 }}</strong>
+        <span>Доступно</span>
+    </div>
+    <div class="chip">
+        <strong>{{ balances|length }}</strong>
+        <span>Складів</span>
+    </div>
+    <div class="chip">
+        <strong>{{ bom_items|length }}</strong>
+        <span>Специфікація</span>
+    </div>
+    <div class="chip">
+        <strong>{{ transactions|length }}</strong>
+        <span>Останній рух</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <section class="panel">
+        <div class="panel-head">
+            <div>
+                <span class="eyebrow">Продукт</span>
+                <h2>Основні дані</h2>
+            </div>
+            <div class="link-row">
+                {% if catalog_url %}
+                    <a href="{{ catalog_url }}">{% if product.is_material %}Матеріали{% else %}Продукти{% endif %}</a>
+                {% endif %}
+                {% if inventory_url %}
+                    <a href="{{ inventory_url }}">Склад</a>
+                {% endif %}
+                {% if transaction_add_url %}
+                    <a href="{{ transaction_add_url }}">Операція</a>
+                {% endif %}
+                {% if product.edit_url %}
+                    <a href="{{ product.edit_url }}">Редагувати</a>
+                {% endif %}
+            </div>
+        </div>
+        <div class="metrics">
+            <div class="metric"><strong>{{ product.sku|default:"—" }}</strong><span>Артикул</span></div>
+            <div class="metric"><strong>{{ product.unit|default:"шт" }}</strong><span>Одиниця</span></div>
+            <div class="metric"><strong>{{ product.min_stock_level|floatformat:3 }}</strong><span>Мінімальний залишок</span></div>
+            <div class="metric"><strong>{% if product.track_inventory %}Так{% else %}Ні{% endif %}</strong><span>Складський облік</span></div>
+        </div>
+        {% if product.description %}
+            <p class="meta-line">{{ product.description }}</p>
+        {% endif %}
+        {% if product.technical_description %}
+            <p class="meta-line">{{ product.technical_description }}</p>
+        {% endif %}
+    </section>
+
+    <section class="section-grid two-up">
+        <article class="panel">
+            <span class="eyebrow">Склад</span>
+            <h2>Залишки по складах</h2>
+            {% if balances %}
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                        <tr>
+                            <th>Склад</th>
+                            <th>Залишок</th>
+                            <th>Резерв</th>
+                            <th>Доступно</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for balance in balances %}
+                            <tr>
+                                <td>{{ balance.warehouse.name }}</td>
+                                <td>{{ balance.quantity|floatformat:3 }}</td>
+                                <td>{{ balance.reserved_quantity|floatformat:3 }}</td>
+                                <td>{{ balance.available|floatformat:3 }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty">По продукту ще немає складських залишків.</p>
+            {% endif %}
+        </article>
+
+        <article class="panel">
+            <span class="eyebrow">Специфікація</span>
+            <h2>Склад продукту</h2>
+            {% if bom_items %}
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                        <tr>
+                            <th>Матеріал</th>
+                            <th>Артикул</th>
+                            <th>Кількість</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for bom in bom_items %}
+                            <tr>
+                                <td><a href="{% url 'crm_product_details' bom.material_id %}">{{ bom.material.name }}</a></td>
+                                <td>{{ bom.material.sku|default:"—" }}</td>
+                                <td>{{ bom.quantity|floatformat:3 }} {{ bom.material.unit|default:"шт" }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty">Для продукту ще не задано склад продукту.</p>
+            {% endif %}
+        </article>
+    </section>
+
+    <section class="section-grid two-up">
+        <article class="panel">
+            <span class="eyebrow">Використання</span>
+            <h2>Де використовується</h2>
+            {% if used_in_products %}
+                <div class="mini-list">
+                    {% for row in used_in_products %}
+                        <article class="item-card">
+                            <h3><a href="{% url 'crm_product_details' row.product_id %}">{{ row.product.name }}</a></h3>
+                            <p class="meta-line">{{ row.quantity|floatformat:3 }} {{ product.unit|default:"шт" }} у складі продукту</p>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="empty">Цей продукт ще не використовується в специфікаціях інших продуктів.</p>
+            {% endif %}
+        </article>
+
+        <article class="panel">
+            <span class="eyebrow">Рух</span>
+            <h2>Останні операції</h2>
+            {% if transactions %}
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Тип</th>
+                            <th>Кількість</th>
+                            <th>Склади</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in transactions %}
+                            <tr>
+                                <td>{{ row.created_at|date:"d.m.Y H:i" }}</td>
+                                <td>{{ row.get_type_display }}</td>
+                                <td>{{ row.quantity|floatformat:3 }}</td>
+                                <td>
+                                    {% if row.warehouse_from %}{{ row.warehouse_from.name }}{% endif %}
+                                    {% if row.warehouse_to %} → {{ row.warehouse_to.name }}{% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty">Операцій по продукту ще немає.</p>
+            {% endif %}
+        </article>
+    </section>
+{% endblock %}

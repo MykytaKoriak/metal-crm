@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
@@ -11,7 +12,9 @@ from core.models import ChangeAuditLog, TelegramNotification
 from core.models import UserProfile
 from manufacture.models import Machine, ProductionStage, WorkUnit
 
-from .models import Client, ClientInteraction, Contact, Order, OrderItem, Product, ProductProductionNorm, Tag, Task
+from .inventory import create_inventory_transaction, get_default_warehouse
+from .models import Client, ClientInteraction, Contact, InventoryReceipt, Order, OrderItem, Product, ProductProductionNorm, Tag, Task
+from .models import InventoryBalance, InventoryTransaction, ProductBOM, Warehouse
 
 
 class CrmWorkspaceMixin:
@@ -110,6 +113,12 @@ class CrmWorkspaceMixin:
             "photos_url": "",
             "production_norms_url": "",
             "is_active": "on",
+            "bom-TOTAL_FORMS": "1",
+            "bom-INITIAL_FORMS": "0",
+            "bom-MIN_NUM_FORMS": "0",
+            "bom-MAX_NUM_FORMS": "1000",
+            "bom-0-material": "",
+            "bom-0-quantity": "",
             "norms-TOTAL_FORMS": "1",
             "norms-INITIAL_FORMS": "0",
             "norms-MIN_NUM_FORMS": "0",
@@ -126,6 +135,7 @@ class CrmWorkspaceMixin:
         if product is not None and norm is not None:
             payload.update(
                 {
+                    "bom-INITIAL_FORMS": "0",
                     "norms-INITIAL_FORMS": "1",
                     "norms-0-id": str(norm.id),
                     "norms-0-product": str(product.id),
@@ -868,3 +878,239 @@ class TestCrmEndToEndFlow(CrmWorkspaceMixin, TestCase):
                 object_id=task.pk,
             ).exists()
         )
+
+
+class TestInventoryWorkflow(CrmWorkspaceMixin, TestCase):
+    def setUp(self):
+        self.admin_user = self.create_user_with_role("inventory-admin@example.com", UserProfile.Role.ADMIN)
+        self.manager = self.create_user_with_role("inventory-manager@example.com", UserProfile.Role.SALES_MANAGER)
+        self.client_entity = Client.objects.create(name="Inventory Client", email="inventory@example.com")
+        self.contact = Contact.objects.create(client=self.client_entity, full_name="Inventory Contact")
+        self.product = Product.objects.create(
+            name="Шафа",
+            sku=f"SKU-{uuid4().hex[:10]}",
+            track_inventory=True,
+            unit="шт",
+        )
+        self.material = Product.objects.create(
+            name="Лист металу",
+            sku=f"MAT-{uuid4().hex[:10]}",
+            track_inventory=True,
+            is_material=True,
+            unit="лист",
+            min_stock_level=Decimal("2.000"),
+        )
+        self.second_material = Product.objects.create(
+            name="Кріплення",
+            sku=f"MAT-{uuid4().hex[:10]}",
+            track_inventory=True,
+            is_material=True,
+            unit="шт",
+            min_stock_level=Decimal("10.000"),
+        )
+        ProductBOM.objects.create(product=self.product, material=self.material, quantity=Decimal("3.000"))
+        self.raw_warehouse = get_default_warehouse(Warehouse.WarehouseType.RAW)
+
+    def create_order_with_item(self, *, status=Order.Status.IN_PROGRESS, quantity=2):
+        with self.captureOnCommitCallbacks(execute=True):
+            order = Order.objects.create(
+                contact=self.contact,
+                manager=self.manager,
+                status=status,
+                deadline=timezone.localdate() + timedelta(days=5),
+            )
+            order_item = OrderItem.objects.create(
+                order=order,
+                product=self.product,
+                quantity=quantity,
+                unit_price=Decimal("100.00"),
+            )
+        return order, order_item
+
+    def test_in_progress_order_reserves_materials_from_bom(self):
+        create_inventory_transaction(
+            transaction_type=InventoryTransaction.TransactionType.IN,
+            product=self.material,
+            quantity=Decimal("10.000"),
+            warehouse_to=self.raw_warehouse,
+            created_by=self.manager,
+        )
+
+        order, order_item = self.create_order_with_item(status=Order.Status.IN_PROGRESS, quantity=2)
+
+        balance = InventoryBalance.objects.get(product=self.material, warehouse=self.raw_warehouse)
+        order_item.refresh_from_db()
+
+        self.assertEqual(balance.quantity, Decimal("10.000"))
+        self.assertEqual(balance.reserved_quantity, Decimal("6.000"))
+        self.assertEqual(balance.available, Decimal("4.000"))
+        self.assertEqual(order_item.required_materials[0]["required"], "6.000")
+        self.assertEqual(order_item.reserved_materials[0]["quantity"], "6.000")
+        self.assertFalse(
+            Task.objects.filter(order=order, title__startswith="Закупка матеріалів").exists()
+        )
+
+    def test_shortage_creates_procurement_task_and_partial_reserve(self):
+        create_inventory_transaction(
+            transaction_type=InventoryTransaction.TransactionType.IN,
+            product=self.material,
+            quantity=Decimal("2.000"),
+            warehouse_to=self.raw_warehouse,
+            created_by=self.manager,
+        )
+
+        order, order_item = self.create_order_with_item(status=Order.Status.IN_PROGRESS, quantity=2)
+
+        balance = InventoryBalance.objects.get(product=self.material, warehouse=self.raw_warehouse)
+        order_item.refresh_from_db()
+        task = Task.objects.filter(order=order, title__startswith="Закупка матеріалів").first()
+
+        self.assertEqual(balance.reserved_quantity, Decimal("2.000"))
+        self.assertEqual(order_item.required_materials[0]["shortage"], "4.000")
+        self.assertIsNotNone(task)
+        self.assertIn("Лист металу", task.description)
+
+    def test_balance_cannot_be_changed_directly(self):
+        create_inventory_transaction(
+            transaction_type=InventoryTransaction.TransactionType.IN,
+            product=self.material,
+            quantity=Decimal("5.000"),
+            warehouse_to=self.raw_warehouse,
+            created_by=self.manager,
+        )
+
+        balance = InventoryBalance.objects.get(product=self.material, warehouse=self.raw_warehouse)
+        balance.quantity = Decimal("1.000")
+
+        with self.assertRaises(ValidationError):
+            balance.save()
+
+    def test_inventory_views_render_balances_and_materials(self):
+        create_inventory_transaction(
+            transaction_type=InventoryTransaction.TransactionType.IN,
+            product=self.material,
+            quantity=Decimal("10.000"),
+            warehouse_to=self.raw_warehouse,
+            created_by=self.manager,
+        )
+        order, _ = self.create_order_with_item(status=Order.Status.IN_PROGRESS, quantity=2)
+
+        self.client.force_login(self.manager)
+        inventory_response = self.client.get(reverse("crm_inventory"))
+        product_response = self.client.get(reverse("crm_product_details", args=[self.product.id]))
+        materials_response = self.client.get(reverse("crm_order_materials", args=[order.id]))
+
+        self.assertEqual(inventory_response.status_code, 200)
+        self.assertContains(inventory_response, "Лист металу")
+        self.assertContains(inventory_response, "Склад")
+        self.assertEqual(product_response.status_code, 200)
+        self.assertContains(product_response, "Склад продукту")
+        self.assertContains(product_response, "Лист металу")
+        self.assertEqual(materials_response.status_code, 200)
+        self.assertContains(materials_response, "Матеріали замовлення")
+        self.assertContains(materials_response, "Лист металу")
+    def test_inventory_receipt_with_multiple_lines_posts_all_materials(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.client.post(
+            reverse("crm_inventory_receipt_create"),
+            {
+                "warehouse": str(self.raw_warehouse.id),
+                "supplier_name": "ТОВ Постачання",
+                "invoice_number": "INV-001",
+                "document_date": timezone.localdate().isoformat(),
+                "comment": "Тестова накладна",
+                "lines-TOTAL_FORMS": "2",
+                "lines-INITIAL_FORMS": "0",
+                "lines-MIN_NUM_FORMS": "0",
+                "lines-MAX_NUM_FORMS": "1000",
+                "lines-0-product": str(self.material.id),
+                "lines-0-quantity": "4.500",
+                "lines-0-comment": "Листи",
+                "lines-1-product": str(self.second_material.id),
+                "lines-1-quantity": "120.000",
+                "lines-1-comment": "Комплект",
+            },
+        )
+
+        self.assertRedirects(response, f"{reverse('crm_inventory')}?product_kind=materials")
+        receipt = InventoryReceipt.objects.get(invoice_number="INV-001")
+        self.assertEqual(receipt.items.count(), 2)
+        self.assertEqual(receipt.transactions.count(), 2)
+
+        first_balance = InventoryBalance.objects.get(product=self.material, warehouse=self.raw_warehouse)
+        second_balance = InventoryBalance.objects.get(product=self.second_material, warehouse=self.raw_warehouse)
+        self.assertEqual(first_balance.quantity, Decimal("4.500"))
+        self.assertEqual(second_balance.quantity, Decimal("120.000"))
+
+
+class TestMaterialRegistry(CrmWorkspaceMixin, TestCase):
+    def setUp(self):
+        self.admin_user = self.create_user_with_role("materials-admin@example.com", UserProfile.Role.ADMIN)
+        self.manager = self.create_user_with_role("materials-manager@example.com", UserProfile.Role.SALES_MANAGER)
+        self.product = Product.objects.create(
+            name="Шафа",
+            sku=f"SKU-{uuid4().hex[:10]}",
+            track_inventory=True,
+            unit="шт",
+        )
+        self.material = Product.objects.create(
+            name="Фанера 18 мм",
+            sku=f"MAT-{uuid4().hex[:10]}",
+            track_inventory=True,
+            is_material=True,
+            unit="лист",
+            min_stock_level=Decimal("2.000"),
+        )
+        self.raw_warehouse = get_default_warehouse(Warehouse.WarehouseType.RAW)
+
+    def test_materials_registry_shows_only_materials(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.get(reverse("crm_materials"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.material.name)
+        self.assertNotContains(response, self.product.name)
+
+    def test_inventory_dashboard_can_be_filtered_to_materials(self):
+        create_inventory_transaction(
+            transaction_type=InventoryTransaction.TransactionType.IN,
+            product=self.material,
+            quantity=Decimal("3.000"),
+            warehouse_to=self.raw_warehouse,
+            created_by=self.manager,
+        )
+        finished_warehouse = get_default_warehouse(Warehouse.WarehouseType.FINISHED)
+        create_inventory_transaction(
+            transaction_type=InventoryTransaction.TransactionType.IN,
+            product=self.product,
+            quantity=Decimal("1.000"),
+            warehouse_to=finished_warehouse,
+            created_by=self.manager,
+        )
+
+        self.client.force_login(self.manager)
+        response = self.client.get(reverse("crm_inventory"), {"product_kind": "materials"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.material.name)
+        self.assertNotContains(response, self.product.name)
+
+    def test_material_create_route_forces_material_inventory_flags(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.client.post(
+            reverse("crm_material_create"),
+            self.build_product_payload(
+                name="Фанера 18 мм",
+                sku="PLYWOOD-18",
+                norm_stage=ProductionStage.StageType.EXECUTION,
+                norm_time_value="0.75",
+            ),
+        )
+
+        material = Product.objects.get(sku="PLYWOOD-18")
+        self.assertRedirects(response, reverse("crm_materials"))
+        self.assertTrue(material.is_material)
+        self.assertTrue(material.track_inventory)

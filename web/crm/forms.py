@@ -10,11 +10,16 @@ from .models import (
     Client,
     ClientInteraction,
     Contact,
+    InventoryReceipt,
+    InventoryReceiptItem,
+    InventoryTransaction,
     Order,
     OrderItem,
     Product,
+    ProductBOM,
     ProductProductionNorm,
     Task,
+    Warehouse,
 )
 
 
@@ -51,6 +56,15 @@ class ContactForm(StyledModelForm):
 
 
 class ProductForm(StyledModelForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["min_stock_level"].required = False
+        self.initial.setdefault("min_stock_level", 0)
+        self.initial.setdefault("track_inventory", True)
+
+    def clean_min_stock_level(self):
+        return self.cleaned_data.get("min_stock_level") or 0
+
     class Meta:
         model = Product
         fields = [
@@ -65,10 +79,15 @@ class ProductForm(StyledModelForm):
             "site_url",
             "photos_url",
             "production_norms_url",
+            "track_inventory",
+            "is_material",
+            "min_stock_level",
+            "unit",
             "is_active",
         ]
         widgets = {
             "base_price": forms.NumberInput(attrs={"step": "0.01"}),
+            "min_stock_level": forms.NumberInput(attrs={"step": "0.001", "min": "0"}),
         }
 
 
@@ -89,6 +108,128 @@ class ProductProductionNormForm(StyledModelForm):
             "time_value": forms.NumberInput(attrs={"step": "0.01", "min": "0.01"}),
             "material_value": forms.NumberInput(attrs={"step": "0.001", "min": "0.001"}),
         }
+
+
+class ProductBOMForm(StyledModelForm):
+    class Meta:
+        model = ProductBOM
+        fields = ["material", "quantity"]
+        widgets = {
+            "quantity": forms.NumberInput(attrs={"step": "0.001", "min": "0.001"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["material"].queryset = Product.objects.filter(is_material=True).order_by("name")
+
+
+class InventoryTransactionForm(StyledModelForm):
+    def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop("user", None)
+        self.product_kind = kwargs.pop("product_kind", "").strip()
+        super().__init__(*args, **kwargs)
+        products = Product.objects.order_by("name")
+        if self.product_kind == "materials":
+            products = products.filter(is_material=True)
+        elif self.product_kind == "products":
+            products = products.filter(is_material=False)
+        self.fields["product"].queryset = products
+        self.fields["warehouse_from"].queryset = Warehouse.objects.filter(is_active=True).order_by("type", "name")
+        self.fields["warehouse_to"].queryset = Warehouse.objects.filter(is_active=True).order_by("type", "name")
+        self.fields["order"].queryset = filter_orders_queryset(
+            self.user,
+            Order.objects.select_related("contact", "contact__client").order_by("-created_at", "-id"),
+        )
+
+        selected_order_id = None
+        if self.is_bound:
+            selected_order_id = self.data.get("order") or None
+        elif self.instance.pk and self.instance.order_id:
+            selected_order_id = str(self.instance.order_id)
+        else:
+            initial_order = self.initial.get("order")
+            if initial_order is not None:
+                selected_order_id = str(getattr(initial_order, "pk", initial_order))
+
+        order_items = OrderItem.objects.select_related("order", "product")
+        if selected_order_id and str(selected_order_id).isdigit():
+            order_items = order_items.filter(order_id=int(selected_order_id))
+        else:
+            order_items = order_items.none()
+        self.fields["order_item"].queryset = order_items.order_by("order_id", "id")
+
+    class Meta:
+        model = InventoryTransaction
+        fields = [
+            "type",
+            "product",
+            "quantity",
+            "warehouse_from",
+            "warehouse_to",
+            "order",
+            "order_item",
+        ]
+        widgets = {
+            "quantity": forms.NumberInput(attrs={"step": "0.001", "min": "0.001"}),
+        }
+
+    def clean(self):
+        cleaned_data = super().clean()
+        order = cleaned_data.get("order")
+        order_item = cleaned_data.get("order_item")
+        if order_item and order and order_item.order_id != order.id:
+            self.add_error("order_item", "Позиція має належати вибраному замовленню.")
+        return cleaned_data
+
+
+class InventoryReceiptForm(StyledModelForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["warehouse"].queryset = Warehouse.objects.filter(
+            is_active=True,
+            type=Warehouse.WarehouseType.RAW,
+        ).order_by("name")
+
+    class Meta:
+        model = InventoryReceipt
+        fields = ["warehouse", "supplier_name", "invoice_number", "document_date", "comment"]
+        widgets = {
+            "document_date": forms.DateInput(attrs={"type": "date"}),
+        }
+
+
+class InventoryReceiptItemForm(StyledModelForm):
+    class Meta:
+        model = InventoryReceiptItem
+        fields = ["product", "quantity", "comment"]
+        widgets = {
+            "quantity": forms.NumberInput(attrs={"step": "0.001", "min": "0.001"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["product"].queryset = Product.objects.filter(is_material=True, track_inventory=True).order_by("name")
+
+
+class RequiredInventoryReceiptItemFormSet(BaseInlineFormSet):
+    def clean(self):
+        super().clean()
+        active_forms = [
+            form
+            for form in self.forms
+            if form.cleaned_data and not form.cleaned_data.get("DELETE") and form.cleaned_data.get("product")
+        ]
+        if not active_forms:
+            raise forms.ValidationError("Накладна має містити хоча б одну позицію матеріалу.")
+
+        seen_product_ids = set()
+        for form in active_forms:
+            product = form.cleaned_data.get("product")
+            if not product:
+                continue
+            if product.pk in seen_product_ids:
+                raise forms.ValidationError("Один і той самий матеріал не можна дублювати в накладній.")
+            seen_product_ids.add(product.pk)
 
 
 class TaskForm(StyledModelForm):
@@ -304,6 +445,26 @@ ProductProductionNormFormSet = inlineformset_factory(
     Product,
     ProductProductionNorm,
     form=ProductProductionNormForm,
+    extra=5,
+    can_delete=True,
+)
+
+
+ProductBOMFormSet = inlineformset_factory(
+    Product,
+    ProductBOM,
+    fk_name="product",
+    form=ProductBOMForm,
+    extra=5,
+    can_delete=True,
+)
+
+
+InventoryReceiptItemFormSet = inlineformset_factory(
+    InventoryReceipt,
+    InventoryReceiptItem,
+    form=InventoryReceiptItemForm,
+    formset=RequiredInventoryReceiptItemFormSet,
     extra=5,
     can_delete=True,
 )

@@ -7,6 +7,7 @@ from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum, 
 from django.db.models.functions import Coalesce, TruncMonth
 from django.utils import timezone
 
+from crm.inventory import get_inventory_deficit_rows
 from crm.models import Client, Order, OrderItem, Task
 from manufacture.models import Machine, ProductionSlot, ProductionStage, WorkUnit
 from manufacture.services import (
@@ -306,6 +307,7 @@ def get_production_dashboard_context(request=None):
             row["stage"].pk,
         )
     )
+    material_shortage_rows = [row for row in queue_rows if row["material_status"] != "ok"]
 
     overdue_stage_report = build_overdue_stage_report(
         now=now,
@@ -331,10 +333,13 @@ def get_production_dashboard_context(request=None):
         .select_related("contact", "contact__client", "manager")
         .order_by("deadline")[:10]
     )
+    inventory_deficit_rows = get_inventory_deficit_rows()[:10]
 
     return {
         "production": production,
         "active_queue": queue_rows[:20],
+        "material_shortage_rows": material_shortage_rows[:10],
+        "inventory_deficit_rows": inventory_deficit_rows,
         "overdue_orders": overdue_orders,
         "overdue_stage_rows": overdue_stage_report["rows"][:10],
         "free_slot_rows": free_slot_report["rows"][:12],
@@ -357,6 +362,7 @@ def get_production_dashboard_context(request=None):
             "overdue_stage_count": len(overdue_stage_report["rows"]),
             "free_window_count": len(free_slot_report["rows"]),
             "critical_resources": production["summary"]["critical_resources"],
+            "material_shortage_count": len(material_shortage_rows),
         },
     }
 

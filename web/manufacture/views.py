@@ -1,6 +1,8 @@
 from datetime import datetime, time, timedelta
 
+from django.contrib import messages
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -348,7 +350,12 @@ def production_stage_status_update(request, stage_id):
     status = request.POST.get("status", "").strip()
     note = request.POST.get("note", "").strip()
     stage._changed_by = request.user
-    update_stage_status(stage, status, note=note)
+    try:
+        update_stage_status(stage, status, note=note)
+    except (ValidationError, ValueError) as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "Статус етапу оновлено.")
     return redirect(next_url)
 
 

@@ -253,25 +253,25 @@
                 {% endfor %}
             </div>
 
-            {% if formset %}
+            {% for section in form_sections %}
                 <section class="form-shell">
                     <div class="line-header">
                         <div>
-                            <span class="eyebrow">{{ formset_eyebrow }}</span>
-                            <h2>{{ formset_title }}</h2>
+                            <span class="eyebrow">{{ section.eyebrow }}</span>
+                            <h2>{{ section.title }}</h2>
                         </div>
-                        <p class="muted">{{ formset_help }}</p>
+                        <p class="muted">{{ section.help }}</p>
                     </div>
 
-                    {{ formset.management_form }}
-                    {% if formset.non_form_errors %}
-                        <div class="form-errors">{{ formset.non_form_errors }}</div>
+                    {{ section.formset.management_form }}
+                    {% if section.formset.non_form_errors %}
+                        <div class="form-errors">{{ section.formset.non_form_errors }}</div>
                     {% endif %}
 
-                    {% for item_form in formset %}
+                    {% for item_form in section.formset %}
                         <div class="line-card full">
                             <div class="line-header">
-                                <h3>{{ formset_item_label }} {{ forloop.counter }}</h3>
+                                <h3>{{ section.item_label }} {{ forloop.counter }}</h3>
                                 {% if item_form.DELETE %}
                                     <label class="checkbox-row">{{ item_form.DELETE }} Видалити рядок</label>
                                 {% endif %}
@@ -288,7 +288,7 @@
                             <div class="line-grid">
                                 {% for field in item_form.visible_fields %}
                                     {% if field.name != "DELETE" %}
-                                        <div class="field-card{% if field.name in item_full_width_fields %} full{% endif %}">
+                                        <div class="field-card{% if field.name in section.item_full_width_fields %} full{% endif %}">
                                             <label for="{{ field.id_for_label }}">
                                                 {{ field.label }}
                                                 {% if field.field.required %}*{% endif %}
@@ -307,7 +307,7 @@
                         </div>
                     {% endfor %}
                 </section>
-            {% endif %}
+            {% endfor %}
 
             <div class="form-actions">
                 <button type="submit" class="primary">{{ submit_label }}</button>

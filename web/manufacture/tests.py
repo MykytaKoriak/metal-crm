@@ -7,8 +7,9 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from crm.inventory import create_inventory_transaction, get_default_warehouse
 from core.models import UserProfile
-from crm.models import Client, Contact, Order, OrderItem, Product, ProductProductionNorm
+from crm.models import Client, Contact, InventoryTransaction, Order, OrderItem, Product, ProductBOM, ProductProductionNorm, Warehouse
 from manufacture.models import (
     Machine,
     ProductionSlot,
@@ -17,7 +18,7 @@ from manufacture.models import (
     ResourceDowntime,
     WorkUnit,
 )
-from manufacture.services import estimate_stage_duration
+from manufacture.services import estimate_stage_duration, request_replan_open_orders
 
 
 class ManufacturePlanningTests(TestCase):
@@ -490,3 +491,101 @@ class ProductionRowLevelVisibilityTests(TestCase):
         self.assertContains(response, self.my_order.title)
         self.assertContains(response, self.other_order.title)
         self.assertEqual(len(response.context["rows"]), 2)
+
+
+class ProductionMaterialPlanningTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="material-planner@example.com",
+            email="material-planner@example.com",
+            password="secret123",
+            is_active=True,
+        )
+        self.user.profile.role = UserProfile.Role.PRODUCTION
+        self.user.profile.save()
+
+        client = Client.objects.create(name="Material Client", email="material@example.com")
+        self.contact = Contact.objects.create(client=client, full_name="Material Contact")
+        self.product = Product.objects.create(name="Стіл", sku="MAT-PLAN-001", track_inventory=True, unit="шт")
+        self.material = Product.objects.create(
+            name="Труба",
+            sku="MAT-RAW-001",
+            track_inventory=True,
+            is_material=True,
+            unit="м",
+        )
+        ProductBOM.objects.create(product=self.product, material=self.material, quantity=Decimal("4.000"))
+
+        self.storage = WorkUnit.objects.create(name="Material Storage", type=WorkUnit.UnitType.STORAGE)
+        self.assembly = WorkUnit.objects.create(name="Material Assembly", type=WorkUnit.UnitType.ASSEMBLY)
+        self.laser = Machine.objects.create(name="Material Laser", type=Machine.MachineType.LASER)
+        self.paint = Machine.objects.create(name="Material Paint", type=Machine.MachineType.PAINTING)
+        self.raw_warehouse = get_default_warehouse(Warehouse.WarehouseType.RAW)
+
+    def create_order(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            order = Order.objects.create(
+                contact=self.contact,
+                manager=self.user,
+                status=Order.Status.IN_PROGRESS,
+                deadline=timezone.localdate() + timedelta(days=5),
+            )
+            OrderItem.objects.create(
+                order=order,
+                product=self.product,
+                quantity=2,
+                unit_price=Decimal("150.00"),
+            )
+        return Order.objects.get(pk=order.pk)
+
+    def test_planner_blocks_execution_stage_without_materials(self):
+        order = self.create_order()
+
+        execution_stage = ProductionStage.objects.get(
+            order_item__order=order,
+            stage_type=ProductionStage.StageType.EXECUTION,
+        )
+
+        self.assertEqual(execution_stage.status, ProductionStage.Status.BLOCKED)
+        self.assertFalse(execution_stage.slots.exists())
+
+    def test_replan_creates_execution_slot_after_material_receipt(self):
+        order = self.create_order()
+        create_inventory_transaction(
+            transaction_type=InventoryTransaction.TransactionType.IN,
+            product=self.material,
+            quantity=Decimal("20.000"),
+            warehouse_to=self.raw_warehouse,
+            created_by=self.user,
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            request_replan_open_orders()
+
+        execution_stage = ProductionStage.objects.get(
+            order_item__order=order,
+            stage_type=ProductionStage.StageType.EXECUTION,
+        )
+
+        self.assertTrue(execution_stage.slots.exists())
+        self.assertEqual(execution_stage.status, ProductionStage.Status.SCHEDULED)
+
+    def test_stage_status_view_returns_message_when_materials_are_missing(self):
+        order = self.create_order()
+        execution_stage = ProductionStage.objects.get(
+            order_item__order=order,
+            stage_type=ProductionStage.StageType.EXECUTION,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("production_stage_status_update", args=[execution_stage.id]),
+            {"status": ProductionStage.Status.IN_PROGRESS, "next": reverse("production_dashboard")},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        execution_stage.refresh_from_db()
+        self.assertEqual(execution_stage.status, ProductionStage.Status.BLOCKED)
+        messages = [message.message for message in response.context["messages"]]
+        self.assertTrue(any("Недостатньо" in message for message in messages))

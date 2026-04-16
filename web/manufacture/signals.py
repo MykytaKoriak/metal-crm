@@ -2,6 +2,7 @@ from django.db.models.signals import post_delete, post_save, pre_delete, pre_sav
 from django.dispatch import receiver
 
 from core.request_context import get_current_user
+from crm.inventory import consume_materials_for_stage, receive_finished_goods_for_stage
 from crm.deletion_state import is_order_deleting
 from crm.interactions import log_stage_interaction
 from crm.models import Order, OrderItem
@@ -93,6 +94,10 @@ def create_default_production_stages(sender, instance, created, **kwargs):
 def sync_order_status_after_stage_save(sender, instance, created, **kwargs):
     if is_order_deleting(instance.order.pk):
         return
+    if instance.status in {ProductionStage.Status.IN_PROGRESS, ProductionStage.Status.DONE}:
+        consume_materials_for_stage(instance, created_by=get_current_user())
+    if instance.status == ProductionStage.Status.DONE:
+        receive_finished_goods_for_stage(instance, created_by=get_current_user())
     sync_order_status_from_production(instance.order, save=True)
     log_stage_interaction(
         instance,

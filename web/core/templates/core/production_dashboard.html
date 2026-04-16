@@ -24,6 +24,10 @@
         <span>Вільних вікон</span>
     </div>
     <div class="chip">
+        <strong>{{ production_summary.material_shortage_count }}</strong>
+        <span>Етапів без матеріалів</span>
+    </div>
+    <div class="chip">
         <strong>{{ production.summary.week_load }}%</strong>
         <span>Завантаження 7 днів</span>
     </div>
@@ -211,11 +215,12 @@
         </article>
         <article class="panel">
             <span class="eyebrow">Резерв</span>
-            <h2>Резерв по ресурсах</h2>
+            <h2>Матеріали і резерв</h2>
             <div class="metrics">
-                <div class="metric"><strong>{{ production_summary.free_window_count }}</strong><span>Вікон 1+ година</span></div>
+                <div class="metric"><strong>{{ production_summary.material_shortage_count }}</strong><span>Етапів без матеріалів</span></div>
+                <div class="metric"><strong>{{ inventory_deficit_rows|length }}</strong><span>Дефіцитних товарів</span></div>
                 <div class="metric"><strong>{{ production.summary.today_load }}%</strong><span>Сьогодні</span></div>
-                <div class="metric"><strong>{{ production.summary.week_load }}%</strong><span>7 днів</span></div>
+                <div class="metric"><strong>{{ production_summary.free_window_count }}</strong><span>Вікон 1+ година</span></div>
             </div>
         </article>
     </section>
@@ -301,6 +306,10 @@
                             <td>
                                 <div class="status-strip">
                                     <span class="pill">{{ row.stage.get_status_display }}</span>
+                                    <span class="pill {{ row.material_status_tone }}">{{ row.material_status_label }}</span>
+                                    {% if row.material_shortage_count %}
+                                        <span class="pill critical">Дефіцит: {{ row.material_shortage_count }}</span>
+                                    {% endif %}
                                     {% if row.is_overdue %}<span class="pill danger">Прострочено</span>{% endif %}
                                 </div>
                             </td>
@@ -336,6 +345,85 @@
         {% else %}
             <p class="empty">За поточними фільтрами активних етапів немає.</p>
         {% endif %}
+    </section>
+
+    <section class="section-grid two-up">
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <span class="eyebrow">Дефіцит етапів</span>
+                    <h2>Етапи з браком матеріалів</h2>
+                </div>
+            </div>
+            {% if material_shortage_rows %}
+                <div class="table-wrap">
+                    <table class="table compact-table">
+                        <thead>
+                        <tr>
+                            <th>Етап</th>
+                            <th>Замовлення</th>
+                            <th>Статус</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in material_shortage_rows %}
+                            <tr>
+                                <td>
+                                    <strong>{{ row.stage.order_item.product.name }}</strong>
+                                    <p class="meta-line">{{ row.stage.get_stage_type_display }}</p>
+                                </td>
+                                <td>{{ row.stage.order_item.order.title|default:"Без назви" }}</td>
+                                <td>
+                                    <span class="pill {{ row.material_status_tone }}">{{ row.material_status_label }}</span>
+                                    {% if row.material_shortage_count %}
+                                        <p class="meta-line">Проблемних матеріалів: {{ row.material_shortage_count }}</p>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty">За активною чергою нестачі матеріалів не виявлено.</p>
+            {% endif %}
+        </article>
+
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <span class="eyebrow">Склад</span>
+                    <h2>Дефіцитні позиції складу</h2>
+                </div>
+                {% if perms.crm.view_inventorybalance %}
+                    <a class="button-link" href="{% url 'crm_inventory' %}?shortage_only=1">Відкрити склад</a>
+                {% endif %}
+            </div>
+            {% if inventory_deficit_rows %}
+                <div class="table-wrap">
+                    <table class="table compact-table">
+                        <thead>
+                        <tr>
+                            <th>Продукт</th>
+                            <th>Доступно</th>
+                            <th>Мінімум</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in inventory_deficit_rows %}
+                            <tr>
+                                <td>{{ row.product.name }}</td>
+                                <td>{{ row.available|floatformat:3 }}</td>
+                                <td>{{ row.product.min_stock_level|floatformat:3 }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty">Дефіцитних позицій складу зараз немає.</p>
+            {% endif %}
+        </article>
     </section>
 
     <section class="section-grid two-up">

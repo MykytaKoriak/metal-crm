@@ -183,6 +183,11 @@ class Product(models.Model):
         verbose_name_plural = "Продукти"
         ordering = ["name"]
 
+    track_inventory = models.BooleanField("Вести складський облік", default=True)
+    is_material = models.BooleanField("Є матеріалом", default=False)
+    min_stock_level = models.DecimalField("Мінімальний залишок", max_digits=14, decimal_places=3, default=0)
+    unit = models.CharField("Одиниця виміру", max_length=32, default="шт", blank=True)
+
     def __str__(self):
         return f"{self.name} ({self.sku})" if self.sku else self.name
 
@@ -273,6 +278,304 @@ class ProductProductionNorm(models.Model):
         return float(self.time_value) * 60.0
 
 
+class Warehouse(models.Model):
+    class WarehouseType(models.TextChoices):
+        RAW = "raw", "Сировина"
+        WIP = "wip", "Незавершене виробництво"
+        FINISHED = "finished", "Готова продукція"
+
+    name = models.CharField("Назва складу", max_length=255, unique=True)
+    type = models.CharField(
+        "Тип складу",
+        max_length=16,
+        choices=WarehouseType.choices,
+        default=WarehouseType.RAW,
+        db_index=True,
+    )
+    is_active = models.BooleanField("Активний", default=True)
+
+    class Meta:
+        verbose_name = "Склад"
+        verbose_name_plural = "Склади"
+        ordering = ["type", "name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.get_type_display()})"
+
+
+class InventoryBalance(models.Model):
+    product = models.ForeignKey(
+        Product,
+        related_name="inventory_balances",
+        on_delete=models.CASCADE,
+        verbose_name="Продукт",
+    )
+    warehouse = models.ForeignKey(
+        Warehouse,
+        related_name="inventory_balances",
+        on_delete=models.CASCADE,
+        verbose_name="Склад",
+    )
+    quantity = models.DecimalField("Кількість", max_digits=14, decimal_places=3, default=0)
+    reserved_quantity = models.DecimalField("Зарезервовано", max_digits=14, decimal_places=3, default=0)
+    updated_at = models.DateTimeField("Оновлено", auto_now=True)
+
+    class Meta:
+        verbose_name = "Залишок на складі"
+        verbose_name_plural = "Залишки на складах"
+        ordering = ["product__name", "warehouse__name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product", "warehouse"],
+                name="crm_unique_inventory_balance_product_warehouse",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.product} / {self.warehouse}"
+
+    @property
+    def available(self):
+        return self.quantity - self.reserved_quantity
+
+    def clean(self):
+        super().clean()
+        if self.quantity < 0:
+            raise ValidationError({"quantity": "Кількість не може бути від'ємною."})
+        if self.reserved_quantity < 0:
+            raise ValidationError({"reserved_quantity": "Резерв не може бути від'ємним."})
+        if self.reserved_quantity > self.quantity:
+            raise ValidationError({"reserved_quantity": "Резерв не може перевищувати залишок."})
+
+    def save(self, *args, **kwargs):
+        service_operation = getattr(self, "_inventory_service_operation", False)
+        if not service_operation:
+            if self.pk:
+                previous = type(self).objects.filter(pk=self.pk).values("quantity", "reserved_quantity").first()
+                if previous and (
+                    previous["quantity"] != self.quantity
+                    or previous["reserved_quantity"] != self.reserved_quantity
+                ):
+                    raise ValidationError("Пряме редагування залишків заборонено. Використовуйте складські операції.")
+            elif self.quantity or self.reserved_quantity:
+                raise ValidationError("Початковий залишок можна створювати лише через складську операцію.")
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class InventoryReceipt(models.Model):
+    warehouse = models.ForeignKey(
+        Warehouse,
+        related_name="inventory_receipts",
+        on_delete=models.PROTECT,
+        verbose_name="Склад",
+    )
+    supplier_name = models.CharField("Постачальник", max_length=255, blank=True)
+    invoice_number = models.CharField("Номер накладної", max_length=100, blank=True)
+    document_date = models.DateField("Дата накладної", default=timezone.localdate, db_index=True)
+    comment = models.CharField("Коментар", max_length=255, blank=True)
+    created_at = models.DateTimeField("Створено", auto_now_add=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="inventory_receipts_created",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Ким створено",
+    )
+    posted_at = models.DateTimeField("Проведено", null=True, blank=True, db_index=True)
+    posted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="inventory_receipts_posted",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Ким проведено",
+    )
+
+    class Meta:
+        verbose_name = "Прибуткова накладна"
+        verbose_name_plural = "Прибуткові накладні"
+        ordering = ["-document_date", "-id"]
+
+    def __str__(self):
+        number = self.invoice_number or f"Накладна #{self.pk or 'new'}"
+        return f"{number} · {self.document_date:%d.%m.%Y}"
+
+
+class InventoryReceiptItem(models.Model):
+    receipt = models.ForeignKey(
+        InventoryReceipt,
+        related_name="items",
+        on_delete=models.CASCADE,
+        verbose_name="Накладна",
+    )
+    product = models.ForeignKey(
+        Product,
+        related_name="inventory_receipt_items",
+        on_delete=models.PROTECT,
+        verbose_name="Матеріал",
+    )
+    quantity = models.DecimalField("Кількість", max_digits=14, decimal_places=3)
+    comment = models.CharField("Коментар", max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = "Позиція накладної"
+        verbose_name_plural = "Позиції накладної"
+        ordering = ["receipt_id", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["receipt", "product"],
+                name="crm_unique_inventory_receipt_item_product",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.receipt} / {self.product} / {self.quantity}"
+
+    def clean(self):
+        super().clean()
+        if self.quantity <= 0:
+            raise ValidationError({"quantity": "Кількість у накладній має бути більшою за нуль."})
+        if self.product_id and not self.product.is_material:
+            raise ValidationError({"product": "У прибутковій накладній для матеріалів можна вказувати лише матеріали."})
+
+
+class ProductBOM(models.Model):
+    product = models.ForeignKey(
+        Product,
+        related_name="bom_items",
+        on_delete=models.CASCADE,
+        verbose_name="Продукт",
+    )
+    material = models.ForeignKey(
+        Product,
+        related_name="used_in_bom",
+        on_delete=models.PROTECT,
+        verbose_name="Матеріал",
+    )
+    quantity = models.DecimalField("Кількість", max_digits=14, decimal_places=3)
+
+    class Meta:
+        verbose_name = "Склад продукту"
+        verbose_name_plural = "Склад продуктів"
+        ordering = ["product__name", "material__name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product", "material"],
+                name="crm_unique_product_bom_material",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.product} / {self.material} / {self.quantity}"
+
+    def clean(self):
+        super().clean()
+        if self.product_id and self.material_id and self.product_id == self.material_id:
+            raise ValidationError({"material": "Матеріал не може збігатися з самим продуктом."})
+        if self.quantity <= 0:
+            raise ValidationError({"quantity": "Кількість у складі продукту має бути більшою за нуль."})
+        if self.material_id and not self.material.is_material:
+            raise ValidationError({"material": "У склад продукту можна додавати лише продукти, позначені як матеріали."})
+
+
+class InventoryTransaction(models.Model):
+    class TransactionType(models.TextChoices):
+        IN = "in", "Прихід"
+        OUT = "out", "Списання"
+        MOVE = "move", "Переміщення"
+        RESERVE = "reserve", "Резерв"
+        RELEASE = "release", "Зняття резерву"
+
+    type = models.CharField("Тип операції", max_length=16, choices=TransactionType.choices, db_index=True)
+    product = models.ForeignKey(
+        Product,
+        related_name="inventory_transactions",
+        on_delete=models.PROTECT,
+        verbose_name="Продукт",
+    )
+    quantity = models.DecimalField("Кількість", max_digits=14, decimal_places=3)
+    warehouse_from = models.ForeignKey(
+        Warehouse,
+        related_name="outgoing_transactions",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        verbose_name="Склад джерело",
+    )
+    warehouse_to = models.ForeignKey(
+        Warehouse,
+        related_name="incoming_transactions",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        verbose_name="Склад призначення",
+    )
+    order = models.ForeignKey(
+        "crm.Order",
+        related_name="inventory_transactions",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Замовлення",
+    )
+    order_item = models.ForeignKey(
+        "crm.OrderItem",
+        related_name="inventory_transactions",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Позиція замовлення",
+    )
+    production_stage = models.ForeignKey(
+        "manufacture.ProductionStage",
+        related_name="inventory_transactions",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Етап виробництва",
+    )
+    receipt = models.ForeignKey(
+        "crm.InventoryReceipt",
+        related_name="transactions",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Прибуткова накладна",
+    )
+    created_at = models.DateTimeField("Створено", auto_now_add=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="inventory_transactions",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Ким створено",
+    )
+
+    class Meta:
+        verbose_name = "Складська операція"
+        verbose_name_plural = "Складські операції"
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"{self.get_type_display()} / {self.product} / {self.quantity}"
+
+    def clean(self):
+        super().clean()
+        if self.quantity <= 0:
+            raise ValidationError({"quantity": "Кількість операції має бути більшою за нуль."})
+        if self.type == self.TransactionType.IN and not self.warehouse_to_id:
+            raise ValidationError({"warehouse_to": "Для приходу потрібно вказати склад призначення."})
+        if self.type in {self.TransactionType.OUT, self.TransactionType.RESERVE, self.TransactionType.RELEASE} and not self.warehouse_from_id:
+            raise ValidationError({"warehouse_from": "Для цієї операції потрібно вказати склад джерело."})
+        if self.type == self.TransactionType.MOVE and (not self.warehouse_from_id or not self.warehouse_to_id):
+            raise ValidationError("Для переміщення потрібно вказати склад джерело та склад призначення.")
+        if self.warehouse_from_id and self.warehouse_to_id and self.warehouse_from_id == self.warehouse_to_id:
+            raise ValidationError("Склад джерело та склад призначення мають відрізнятися.")
+
+
 class OrderItem(models.Model):
     order = models.ForeignKey(
         "crm.Order",
@@ -297,6 +600,10 @@ class OrderItem(models.Model):
     class Meta:
         verbose_name = "Позиція замовлення"
         verbose_name_plural = "Позиції замовлення"
+
+    required_materials = models.JSONField("Потрібні матеріали", default=list, blank=True)
+    reserved_materials = models.JSONField("Зарезервовані матеріали", default=list, blank=True)
+    consumed_materials = models.JSONField("Списані матеріали", default=list, blank=True)
 
     def __str__(self):
         return f"{self.product} x {self.quantity}"

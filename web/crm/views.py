@@ -2,6 +2,7 @@ from datetime import timedelta
 from decimal import Decimal
 from urllib.parse import urlencode
 
+from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
@@ -30,14 +31,38 @@ from .forms import (
     ClientForm,
     ClientInteractionForm,
     ContactForm,
+    InventoryReceiptForm,
+    InventoryReceiptItemFormSet,
+    InventoryTransactionForm,
     OrderForm,
     OrderItemFormSet,
     ProductForm,
+    ProductBOMFormSet,
     ProductProductionNormFormSet,
     TaskForm,
 )
+from .inventory import (
+    create_inventory_transaction,
+    get_inventory_deficit_rows,
+    get_inventory_product_rows,
+    get_order_item_material_status,
+    get_product_transaction_rows,
+    post_inventory_receipt,
+    refresh_order_item_materials,
+)
 from .interactions import create_client_interaction
-from .models import Client, ClientInteraction, Contact, Order, Product, ProductProductionNorm, Task
+from .models import (
+    Client,
+    ClientInteraction,
+    Contact,
+    InventoryReceipt,
+    InventoryTransaction,
+    Order,
+    Product,
+    ProductProductionNorm,
+    Task,
+    Warehouse,
+)
 
 
 MONEY_FIELD = DecimalField(max_digits=12, decimal_places=2)
@@ -77,6 +102,26 @@ TASK_KANBAN_COLUMNS = (
     (Task.Status.WAITING, "Очікують"),
     (Task.Status.DONE, "Виконано"),
 )
+MATERIAL_STATUS_META = {
+    "ok": {"label": "Матеріали є", "tone": "healthy"},
+    "partial": {"label": "Частково", "tone": "warning"},
+    "none": {"label": "Немає", "tone": "critical"},
+}
+
+
+PRODUCT_KIND_OPTIONS = (
+    ("", "Усі позиції"),
+    ("materials", "Лише матеріали"),
+    ("products", "Лише продукти"),
+)
+
+
+def _product_catalog_kind(request):
+    url_name = getattr(getattr(request, "resolver_match", None), "url_name", "")
+    if url_name in {"crm_materials", "crm_material_create"}:
+        return "materials"
+    kind = request.GET.get("kind", "").strip()
+    return "materials" if kind == "materials" else "products"
 
 
 def _crm_context(request, crm_nav):
@@ -93,7 +138,7 @@ def _search_param(request):
 
 
 def _annotated_orders_queryset():
-    return Order.objects.select_related("contact", "contact__client", "manager").annotate(
+    return Order.objects.select_related("contact", "contact__client", "manager").prefetch_related("items__product").annotate(
         items_total=Coalesce(
             Sum(
                 ExpressionWrapper(
@@ -215,6 +260,7 @@ def _decorate_order(order, *, current_url, can_change_order, can_delete_order, t
     order.client_url = reverse("client_details", args=[order.contact.client_id])
     order.edit_url = _build_url("crm_order_update", args=[order.id], next_url=current_url) if can_change_order else None
     order.delete_url = _build_url("crm_order_delete", args=[order.id], next_url=current_url) if can_delete_order else None
+    order.materials_url = _build_url("crm_order_materials", args=[order.id], next_url=current_url)
     order.delivery_request_text = order.get_delivery_request_text()
     order.is_overdue = bool(
         order.deadline and order.deadline < today and order.status not in [Order.Status.COMPLETED, Order.Status.CANCELED]
@@ -237,6 +283,96 @@ def _decorate_order(order, *, current_url, can_change_order, can_delete_order, t
         payment_parts.append(f"{order.payment_amount:.2f}")
     order.delivery_summary = " · ".join(delivery_parts)
     order.payment_summary = " · ".join(payment_parts)
+    material_items = []
+    shortage_count = 0
+    reserved_any = False
+    for item in order.items.all():
+        rows = item.required_materials or refresh_order_item_materials(item, save=False)
+        status = "ok"
+        if rows:
+            enough_count = sum(1 for row in rows if row.get("is_enough"))
+            if enough_count == 0:
+                status = "none"
+            elif enough_count < len(rows):
+                status = "partial"
+        if status != "ok":
+            shortage_count += 1
+        if any(Decimal(str(row.get("reserved") or "0")) > 0 for row in rows):
+            reserved_any = True
+        material_items.append({"item": item, "rows": rows, "status": status})
+    order.material_items = material_items
+    order.material_shortage_count = shortage_count
+    order.material_status = "none" if material_items and shortage_count == len(material_items) else "partial" if shortage_count else "ok"
+    order.material_status_label = MATERIAL_STATUS_META[order.material_status]["label"]
+    order.material_status_tone = MATERIAL_STATUS_META[order.material_status]["tone"]
+    order.has_reserved_materials = reserved_any
+
+
+def _decorate_product(product, *, current_url, can_change_product, can_delete_product):
+    prefetched = getattr(product, "_prefetched_objects_cache", {})
+    if "inventory_balances" in prefetched:
+        balances = sorted(
+            prefetched["inventory_balances"],
+            key=lambda balance: (balance.warehouse.type, balance.warehouse.name),
+        )
+    else:
+        balances = list(product.inventory_balances.select_related("warehouse").order_by("warehouse__type", "warehouse__name"))
+    product.details_url = reverse("crm_product_details", args=[product.id])
+    product.edit_url = _build_url("crm_product_update", args=[product.id], next_url=current_url) if can_change_product else None
+    product.delete_url = _build_url("crm_product_delete", args=[product.id], next_url=current_url) if can_delete_product else None
+    product.bom_count = len(prefetched["bom_items"]) if "bom_items" in prefetched else product.bom_items.count()
+    product.balance_rows = balances
+    product.total_quantity = sum((balance.quantity for balance in balances), Decimal("0"))
+    product.total_reserved = sum((balance.reserved_quantity for balance in balances), Decimal("0"))
+    product.available_quantity = product.total_quantity - product.total_reserved
+    product.is_below_min_stock = product.track_inventory and product.available_quantity < product.min_stock_level
+
+
+def _product_catalog_meta(*, is_material):
+    if is_material:
+        return {
+            "crm_nav": "materials",
+            "catalog_url": reverse("crm_materials"),
+            "catalog_label": "Матеріали",
+            "page_title": "Матеріали",
+            "object_label": "Матеріал",
+            "hero_create": "Створити матеріал",
+            "hero_update": "Редагувати матеріал",
+            "hero_create_text": "Новий матеріал додається у складський довідник разом з одиницею виміру, мінімальним залишком і складом використання.",
+            "hero_update_text": "Оновлення складських параметрів, опису та норм використання матеріалу в одному робочому екрані.",
+            "submit_create": "Створити матеріал",
+            "submit_update": "Зберегти матеріал",
+        }
+    return {
+        "crm_nav": "products",
+        "catalog_url": reverse("crm_products"),
+        "catalog_label": "Продукти",
+        "page_title": "Новий продукт",
+        "object_label": "Продукт",
+        "hero_create": "Створити продукт",
+        "hero_update": "Редагувати продукт",
+        "hero_create_text": "Новий продукт додається у каталог разом зі складськими параметрами, складом продукту та нормативами виробництва.",
+        "hero_update_text": "Оновлення каталожних, складських і виробничих параметрів продукту в одному робочому екрані.",
+        "submit_create": "Створити продукт",
+        "submit_update": "Зберегти продукт",
+    }
+
+
+def _inventory_context(request):
+    current_url = request.get_full_path()
+    return {
+        "inventory_url": reverse("crm_inventory"),
+        "materials_url": reverse("crm_materials") if request.user.has_perm("crm.view_product") else None,
+        "materials_inventory_url": f"{reverse('crm_inventory')}?{urlencode({'product_kind': 'materials'})}"
+        if request.user.has_perm("crm.view_inventorybalance")
+        else None,
+        "inventory_receipt_url": _build_url("crm_inventory_receipt_create", next_url=current_url)
+        if request.user.has_perm("crm.add_inventoryreceipt")
+        else None,
+        "inventory_operation_url": _build_url("crm_inventory_transaction_create", next_url=current_url)
+        if request.user.has_perm("crm.add_inventorytransaction")
+        else None,
+    }
 
 
 def _tasks_base_queryset():
@@ -443,6 +579,7 @@ def _render_form_page(
     mode_label,
     object_label,
     formset=None,
+    form_sections=None,
     delete_url=None,
     full_width_fields=None,
     item_full_width_fields=None,
@@ -458,6 +595,18 @@ def _render_form_page(
     context = _crm_context(request, crm_nav)
     if client is not None:
         context.update(_client_workspace_context(request, client))
+    resolved_form_sections = list(form_sections or [])
+    if formset is not None and not resolved_form_sections:
+        resolved_form_sections.append(
+            {
+                "formset": formset,
+                "eyebrow": formset_eyebrow,
+                "title": formset_title,
+                "help": formset_help,
+                "item_label": formset_item_label,
+                "item_full_width_fields": item_full_width_fields or ORDER_ITEM_FULL_WIDTH_FIELDS,
+            }
+        )
     context.update(
         {
             "page_title": page_title,
@@ -469,11 +618,7 @@ def _render_form_page(
             "mode_label": mode_label,
             "object_label": object_label,
             "form": form,
-            "formset": formset,
-            "formset_eyebrow": formset_eyebrow,
-            "formset_title": formset_title,
-            "formset_help": formset_help,
-            "formset_item_label": formset_item_label,
+            "form_sections": resolved_form_sections,
             "delete_url": delete_url,
             "full_width_fields": full_width_fields or DEFAULT_FULL_WIDTH_FIELDS,
             "item_full_width_fields": item_full_width_fields or ORDER_ITEM_FULL_WIDTH_FIELDS,
@@ -875,6 +1020,57 @@ def orders_list(request):
 
 
 @roles_required(*INTERNAL_ROLES)
+def order_materials(request, order_id):
+    order = get_object_or_404(
+        filter_orders_queryset(
+            request.user,
+            _annotated_orders_queryset(),
+        ),
+        pk=order_id,
+    )
+    current_url = request.get_full_path()
+    today = timezone.localdate()
+    _decorate_order(
+        order,
+        current_url=current_url,
+        can_change_order=request.user.has_perm("crm.change_order"),
+        can_delete_order=request.user.has_perm("crm.delete_order"),
+        today=today,
+    )
+    material_rows = []
+    summary = {"item_count": 0, "shortage_items": 0, "reserved_items": 0, "consumed_items": 0}
+    for entry in order.material_items:
+        row_count = len(entry["rows"])
+        reserved_count = sum(1 for row in entry["rows"] if Decimal(str(row.get("reserved") or "0")) > 0)
+        consumed_count = sum(1 for row in entry["rows"] if Decimal(str(row.get("consumed") or "0")) > 0)
+        summary["item_count"] += row_count
+        summary["shortage_items"] += sum(1 for row in entry["rows"] if not row.get("is_enough"))
+        summary["reserved_items"] += reserved_count
+        summary["consumed_items"] += consumed_count
+        material_rows.append(
+            {
+                "order_item": entry["item"],
+                "rows": entry["rows"],
+                "status": entry["status"],
+                "status_label": MATERIAL_STATUS_META[entry["status"]]["label"],
+                "status_tone": MATERIAL_STATUS_META[entry["status"]]["tone"],
+            }
+        )
+
+    context = _crm_context(request, "orders")
+    context.update(_client_workspace_context(request, order.contact.client, current_url=current_url))
+    context.update(_inventory_context(request))
+    context.update(
+        {
+            "order": order,
+            "material_rows": material_rows,
+            "summary": summary,
+        }
+    )
+    return render(request, "crm/order_materials.html", context)
+
+
+@roles_required(*INTERNAL_ROLES)
 def tasks_list(request):
     today = timezone.localdate()
     filter_values = _task_filter_values(request)
@@ -1001,7 +1197,8 @@ def task_status_update(request, task_id):
 def products_list(request):
     search = _search_param(request)
     queryset = (
-        Product.objects.annotate(order_items_count=Count("order_items", distinct=True))
+        Product.objects.prefetch_related("inventory_balances__warehouse", "bom_items", "used_in_bom")
+        .annotate(order_items_count=Count("order_items", distinct=True))
         .order_by("name", "id")
     )
     if search:
@@ -1017,14 +1214,20 @@ def products_list(request):
     can_delete_product = request.user.has_perm("crm.delete_product")
     products = list(queryset[:100])
     for product in products:
-        product.edit_url = _build_url("crm_product_update", args=[product.id], next_url=current_url) if can_change_product else None
-        product.delete_url = _build_url("crm_product_delete", args=[product.id], next_url=current_url) if can_delete_product else None
+        _decorate_product(
+            product,
+            current_url=current_url,
+            can_change_product=can_change_product,
+            can_delete_product=can_delete_product,
+        )
 
     stats = {
         "total_products": Product.objects.count(),
         "active_products": Product.objects.filter(is_active=True).count(),
-        "inactive_products": Product.objects.filter(is_active=False).count(),
+        "tracked_products": Product.objects.filter(track_inventory=True).count(),
+        "materials_count": Product.objects.filter(is_material=True).count(),
         "used_in_orders": Product.objects.filter(order_items__isnull=False).distinct().count(),
+        "deficit_products": len(get_inventory_deficit_rows()),
     }
 
     context = _crm_context(request, "products")
@@ -1033,12 +1236,318 @@ def products_list(request):
             "search": search,
             "products": products,
             "stats": stats,
+            "inventory_url": reverse("crm_inventory")
+            if request.user.has_perm("crm.view_inventorybalance")
+            else None,
+            "materials_url": reverse("crm_materials")
+            if request.user.has_perm("crm.view_product")
+            else None,
             "product_add_url": _build_url("crm_product_create", next_url=current_url)
             if request.user.has_perm("crm.add_product")
             else None,
         }
     )
     return render(request, "crm/products_list.html", context)
+
+
+@roles_required(*INTERNAL_ROLES)
+def materials_list(request):
+    search = _search_param(request)
+    queryset = (
+        Product.objects.filter(is_material=True)
+        .prefetch_related("inventory_balances__warehouse", "used_in_bom__product")
+        .annotate(order_items_count=Count("inventory_transactions__order_item", distinct=True))
+        .order_by("name", "id")
+    )
+    if search:
+        queryset = queryset.filter(
+            Q(name__icontains=search)
+            | Q(sku__icontains=search)
+            | Q(description__icontains=search)
+            | Q(technical_description__icontains=search)
+        )
+
+    current_url = request.get_full_path()
+    can_change_product = request.user.has_perm("crm.change_product")
+    can_delete_product = request.user.has_perm("crm.delete_product")
+    materials = list(queryset[:100])
+    for material in materials:
+        _decorate_product(
+            material,
+            current_url=current_url,
+            can_change_product=can_change_product,
+            can_delete_product=can_delete_product,
+        )
+        prefetched = getattr(material, "_prefetched_objects_cache", {})
+        material.used_in_specs_count = (
+            len(prefetched["used_in_bom"]) if "used_in_bom" in prefetched else material.used_in_bom.count()
+        )
+
+    deficit_rows = [row for row in get_inventory_deficit_rows() if row["product"].is_material]
+    stats = {
+        "total_materials": Product.objects.filter(is_material=True).count(),
+        "tracked_materials": Product.objects.filter(is_material=True, track_inventory=True).count(),
+        "used_in_specs": Product.objects.filter(is_material=True, used_in_bom__isnull=False).distinct().count(),
+        "deficit_materials": len(deficit_rows),
+        "movement_materials": Product.objects.filter(
+            is_material=True,
+            inventory_transactions__isnull=False,
+        ).distinct().count(),
+    }
+
+    inventory_url = None
+    if request.user.has_perm("crm.view_inventorybalance"):
+        inventory_url = f"{reverse('crm_inventory')}?{urlencode({'product_kind': 'materials'})}"
+
+    context = _crm_context(request, "materials")
+    context.update(_inventory_context(request))
+    context.update(
+        {
+            "search": search,
+            "materials": materials,
+            "stats": stats,
+            "inventory_url": inventory_url,
+            "products_url": reverse("crm_products")
+            if request.user.has_perm("crm.view_product")
+            else None,
+            "material_add_url": _build_url("crm_material_create", next_url=current_url)
+            if request.user.has_perm("crm.add_product")
+            else None,
+        }
+    )
+    return render(request, "crm/materials_list.html", context)
+
+
+@roles_required(*INTERNAL_ROLES)
+def product_details(request, product_id):
+    product = get_object_or_404(
+        Product.objects.prefetch_related("inventory_balances__warehouse", "bom_items__material", "used_in_bom__product"),
+        pk=product_id,
+    )
+    current_url = request.get_full_path()
+    _decorate_product(
+        product,
+        current_url=current_url,
+        can_change_product=request.user.has_perm("crm.change_product"),
+        can_delete_product=request.user.has_perm("crm.delete_product"),
+    )
+    transactions = get_product_transaction_rows(product, limit=80)
+    context = _crm_context(request, "materials" if product.is_material else "products")
+    context.update(_inventory_context(request))
+    context.update(
+        {
+            "product": product,
+            "catalog_url": reverse("crm_materials") if product.is_material else reverse("crm_products"),
+            "balances": product.balance_rows,
+            "transactions": transactions,
+            "bom_items": list(product.bom_items.select_related("material").order_by("material__name", "id")),
+            "used_in_products": list(product.used_in_bom.select_related("product").order_by("product__name", "id")),
+            "transaction_add_url": _build_url(
+                "crm_inventory_transaction_create",
+                params={"product": product.id},
+                next_url=current_url,
+            )
+            if request.user.has_perm("crm.add_inventorytransaction")
+            else None,
+        }
+    )
+    return render(request, "crm/product_details.html", context)
+
+
+@roles_required(*INTERNAL_ROLES)
+def inventory_dashboard(request):
+    if not request.user.has_perm("crm.view_inventorybalance"):
+        raise PermissionDenied
+
+    search = _search_param(request)
+    warehouse_type = request.GET.get("warehouse_type", "").strip()
+    shortage_only = request.GET.get("shortage_only") == "1"
+    product_kind = request.GET.get("product_kind", "").strip()
+    warehouse_types = {choice[0] for choice in Warehouse.WarehouseType.choices}
+    product_kinds = {choice[0] for choice in PRODUCT_KIND_OPTIONS}
+    if warehouse_type and warehouse_type not in warehouse_types:
+        warehouse_type = ""
+    if product_kind not in product_kinds:
+        product_kind = ""
+
+    rows = get_inventory_product_rows(
+        search=search,
+        warehouse_type=warehouse_type,
+        shortage_only=shortage_only,
+        product_kind=product_kind,
+    )
+    recent_transactions = list(
+        InventoryTransaction.objects.select_related(
+            "product",
+            "warehouse_from",
+            "warehouse_to",
+            "order",
+            "created_by",
+        ).order_by("-created_at", "-id")[:40]
+    )
+    if search:
+        recent_transactions = [
+            row
+            for row in recent_transactions
+            if search.lower() in (row.product.name or "").lower()
+            or search.lower() in (row.product.sku or "").lower()
+        ]
+    if product_kind == "materials":
+        recent_transactions = [row for row in recent_transactions if row.product.is_material]
+    elif product_kind == "products":
+        recent_transactions = [row for row in recent_transactions if not row.product.is_material]
+
+    context = _crm_context(request, "inventory")
+    context.update(_inventory_context(request))
+    context.update(
+        {
+            "search": search,
+            "warehouse_type": warehouse_type,
+            "shortage_only": shortage_only,
+            "product_kind": product_kind,
+            "warehouse_type_choices": Warehouse.WarehouseType.choices,
+            "product_kind_choices": PRODUCT_KIND_OPTIONS,
+            "rows": rows,
+            "recent_transactions": recent_transactions,
+            "deficit_rows": [row for row in rows if row["is_deficit"]],
+            "stats": {
+                "product_count": len(rows),
+                "deficit_count": sum(1 for row in rows if row["is_deficit"]),
+                "transaction_count": InventoryTransaction.objects.count(),
+                "tracked_count": Product.objects.filter(track_inventory=True).count(),
+                "materials_count": sum(1 for row in rows if row["product"].is_material),
+            },
+        }
+    )
+    return render(request, "crm/inventory_dashboard.html", context)
+
+
+@roles_required(*INTERNAL_ROLES)
+def inventory_receipt_create(request):
+    _require_permission(request, "crm.add_inventoryreceipt")
+
+    raw_warehouse = Warehouse.objects.filter(
+        is_active=True,
+        type=Warehouse.WarehouseType.RAW,
+    ).order_by("name").first()
+    initial = {
+        "warehouse": request.GET.get("warehouse") or getattr(raw_warehouse, "pk", None),
+        "document_date": timezone.localdate(),
+    }
+    form = InventoryReceiptForm(request.POST or None, initial=initial)
+    formset = InventoryReceiptItemFormSet(request.POST or None, instance=InventoryReceipt(), prefix="lines")
+
+    if request.method == "POST" and form.is_valid() and formset.is_valid():
+        try:
+            lines = [
+                {
+                    "product": item_form.cleaned_data.get("product"),
+                    "quantity": item_form.cleaned_data.get("quantity"),
+                    "comment": item_form.cleaned_data.get("comment"),
+                }
+                for item_form in formset.forms
+                if item_form.cleaned_data and not item_form.cleaned_data.get("DELETE")
+            ]
+            receipt = post_inventory_receipt(
+                warehouse=form.cleaned_data["warehouse"],
+                supplier_name=form.cleaned_data.get("supplier_name"),
+                invoice_number=form.cleaned_data.get("invoice_number"),
+                document_date=form.cleaned_data.get("document_date"),
+                comment=form.cleaned_data.get("comment"),
+                lines=lines,
+                created_by=request.user,
+            )
+        except ValueError as exc:
+            form.add_error(None, str(exc))
+        else:
+            messages.success(
+                request,
+                f"Прибуткову накладну проведено. Додано {receipt.items.count()} позицій матеріалів.",
+            )
+            return _redirect_target(
+                request,
+                f"{reverse('crm_inventory')}?{urlencode({'product_kind': 'materials'})}",
+            )
+
+    return _render_form_page(
+        request,
+        crm_nav="inventory",
+        form=form,
+        form_sections=[
+            {
+                "formset": formset,
+                "eyebrow": "Позиції",
+                "title": "Матеріали у накладній",
+                "help": "Додайте всі рядки накладної. По кожному рядку буде створено окремий прихід у складському журналі.",
+                "item_label": "Рядок",
+                "item_full_width_fields": ["comment"],
+            },
+        ],
+        page_title="Прибуткова накладна",
+        hero_title="Прихід матеріалів за накладною",
+        hero_text="Оформлення приходу кількох матеріалів одним документом. Проведення накладної створює всі складські рухи автоматично.",
+        submit_label="Провести накладну",
+        cancel_url=_safe_next_url(request) or f"{reverse('crm_inventory')}?{urlencode({'product_kind': 'materials'})}",
+        mode_label="Створення",
+        object_label="Прибуткова накладна",
+        full_width_fields=["comment"],
+    )
+
+
+@roles_required(*INTERNAL_ROLES)
+def inventory_transaction_create(request):
+    _require_permission(request, "crm.add_inventorytransaction")
+    product_kind = request.GET.get("product_kind", "").strip()
+    if product_kind not in {"", "materials", "products"}:
+        product_kind = ""
+
+    initial = {
+        "type": request.GET.get("type") or InventoryTransaction.TransactionType.IN,
+        "product": request.GET.get("product") or None,
+        "order": request.GET.get("order") or None,
+        "order_item": request.GET.get("order_item") or None,
+        "warehouse_from": request.GET.get("warehouse_from") or None,
+        "warehouse_to": request.GET.get("warehouse_to") or None,
+    }
+    form = InventoryTransactionForm(
+        request.POST or None,
+        initial=initial,
+        user=request.user,
+        product_kind=product_kind,
+    )
+    if request.method == "POST" and form.is_valid():
+        try:
+            tx = create_inventory_transaction(
+                transaction_type=form.cleaned_data["type"],
+                product=form.cleaned_data["product"],
+                quantity=form.cleaned_data["quantity"],
+                warehouse_from=form.cleaned_data.get("warehouse_from"),
+                warehouse_to=form.cleaned_data.get("warehouse_to"),
+                order=form.cleaned_data.get("order"),
+                order_item=form.cleaned_data.get("order_item"),
+                created_by=request.user,
+            )
+        except ValueError as exc:
+            form.add_error(None, str(exc))
+        else:
+            messages.success(request, "Складську операцію виконано.")
+            if tx.product_id:
+                return _redirect_target(request, reverse("crm_product_details", args=[tx.product_id]))
+            return _redirect_target(request, reverse("crm_inventory"))
+
+    return _render_form_page(
+        request,
+        crm_nav="inventory",
+        form=form,
+        page_title="Складська операція",
+        hero_title="Створити складську операцію",
+        hero_text="Прихід, списання, переміщення, резерв або зняття резерву оформлюються тільки через складський рух.",
+        submit_label="Провести операцію",
+        cancel_url=_safe_next_url(request) or reverse("crm_inventory"),
+        mode_label="Створення",
+        object_label="Складська операція",
+        full_width_fields=[],
+    )
 
 
 @roles_required(*INTERNAL_ROLES)
@@ -1521,31 +2030,103 @@ def product_create(request):
     _require_permission(request, "crm.add_product")
     product = Product()
     form = ProductForm(request.POST or None, instance=product)
-    formset = ProductProductionNormFormSet(request.POST or None, instance=product, prefix="norms")
-    if request.method == "POST" and form.is_valid() and formset.is_valid():
+    norm_formset = ProductProductionNormFormSet(request.POST or None, instance=product, prefix="norms")
+    bom_formset = ProductBOMFormSet(request.POST or None, instance=product, prefix="bom")
+    if request.method == "POST" and form.is_valid() and norm_formset.is_valid() and bom_formset.is_valid():
         with transaction.atomic():
             product = form.save()
-            formset.instance = product
-            formset.save()
+            norm_formset.instance = product
+            bom_formset.instance = product
+            norm_formset.save()
+            bom_formset.save()
         return _redirect_target(request, reverse("crm_products"))
     return _render_form_page(
         request,
-        crm_nav="products",
+        crm_nav="materials" if product.is_material else "products",
         form=form,
-        formset=formset,
+        form_sections=[
+            {
+                "formset": bom_formset,
+                "eyebrow": "Специфікація",
+                "title": "Склад продукту",
+                "help": "Матеріали зі складу продукту використовуються для резерву, списання та перевірки дефіциту.",
+                "item_label": "Матеріал",
+                "item_full_width_fields": [],
+            },
+            {
+                "formset": norm_formset,
+                "eyebrow": "Норми виробництва",
+                "title": "Нормативи виробництва",
+                "help": "Норми задаються по етапах і використовуються автопланувальником.",
+                "item_label": "Норматив",
+                "item_full_width_fields": ["comment"],
+            },
+        ],
         page_title="Новий продукт",
         hero_title="Створити продукт",
-        hero_text="Новий продукт додається у власний CRM-каталог з технічними даними та структурованими нормами виробництва.",
+        hero_text="Новий продукт додається у каталог разом зі складськими параметрами, складом продукту та нормативами виробництва.",
         submit_label="Створити продукт",
         cancel_url=_safe_next_url(request) or reverse("crm_products"),
         mode_label="Створення",
         object_label="Продукт",
         full_width_fields=DEFAULT_FULL_WIDTH_FIELDS,
-        item_full_width_fields=["comment"],
-        formset_eyebrow="Норми виробництва",
-        formset_title="Нормативи виробництва",
-        formset_help="Норми задаються по етапах і використовуються автопланувальником.",
-        formset_item_label="Норматив",
+    )
+
+
+@roles_required(*INTERNAL_ROLES)
+def material_create(request):
+    _require_permission(request, "crm.add_product")
+    product = Product(is_material=True, track_inventory=True)
+    form = ProductForm(
+        request.POST or None,
+        instance=product,
+        initial={"is_material": True, "track_inventory": True},
+    )
+    norm_formset = ProductProductionNormFormSet(request.POST or None, instance=product, prefix="norms")
+    bom_formset = ProductBOMFormSet(request.POST or None, instance=product, prefix="bom")
+    if request.method == "POST" and form.is_valid() and norm_formset.is_valid() and bom_formset.is_valid():
+        with transaction.atomic():
+            product = form.save(commit=False)
+            product.is_material = True
+            product.track_inventory = True
+            product.save()
+            norm_formset.instance = product
+            bom_formset.instance = product
+            norm_formset.save()
+            bom_formset.save()
+        return _redirect_target(request, reverse("crm_materials"))
+
+    catalog_meta = _product_catalog_meta(is_material=True)
+    return _render_form_page(
+        request,
+        crm_nav=catalog_meta["crm_nav"],
+        form=form,
+        form_sections=[
+            {
+                "formset": bom_formset,
+                "eyebrow": "Специфікація",
+                "title": "Склад матеріалу",
+                "help": "Матеріал можна використовувати у специфікаціях інших продуктів і вести по ньому окремий складський облік.",
+                "item_label": "Вкладення",
+                "item_full_width_fields": [],
+            },
+            {
+                "formset": norm_formset,
+                "eyebrow": "Норми виробництва",
+                "title": "Нормативи використання",
+                "help": "За потреби для матеріалу можна зберігати нормативи по виробничих етапах.",
+                "item_label": "Норматив",
+                "item_full_width_fields": ["comment"],
+            },
+        ],
+        page_title=catalog_meta["page_title"],
+        hero_title=catalog_meta["hero_create"],
+        hero_text=catalog_meta["hero_create_text"],
+        submit_label=catalog_meta["submit_create"],
+        cancel_url=_safe_next_url(request) or catalog_meta["catalog_url"],
+        mode_label="Створення",
+        object_label=catalog_meta["object_label"],
+        full_width_fields=DEFAULT_FULL_WIDTH_FIELDS,
     )
 
 
@@ -1554,22 +2135,42 @@ def product_update(request, product_id):
     _require_permission(request, "crm.change_product")
     product = get_object_or_404(Product, pk=product_id)
     form = ProductForm(request.POST or None, instance=product)
-    formset = ProductProductionNormFormSet(request.POST or None, instance=product, prefix="norms")
-    if request.method == "POST" and form.is_valid() and formset.is_valid():
+    norm_formset = ProductProductionNormFormSet(request.POST or None, instance=product, prefix="norms")
+    bom_formset = ProductBOMFormSet(request.POST or None, instance=product, prefix="bom")
+    if request.method == "POST" and form.is_valid() and norm_formset.is_valid() and bom_formset.is_valid():
         with transaction.atomic():
             product = form.save()
-            formset.instance = product
-            formset.save()
-        return _redirect_target(request, reverse("crm_products"))
-    fallback_url = reverse("crm_products")
+            norm_formset.instance = product
+            bom_formset.instance = product
+            norm_formset.save()
+            bom_formset.save()
+        return _redirect_target(request, reverse("crm_materials") if product.is_material else reverse("crm_products"))
+    fallback_url = reverse("crm_materials") if product.is_material else reverse("crm_products")
     return _render_form_page(
         request,
-        crm_nav="products",
+        crm_nav="materials" if product.is_material else "products",
         form=form,
-        formset=formset,
+        form_sections=[
+            {
+                "formset": bom_formset,
+                "eyebrow": "Специфікація",
+                "title": "Склад продукту",
+                "help": "Матеріали зі складу продукту формують потребу, резерв і дефіцит по замовленнях.",
+                "item_label": "Матеріал",
+                "item_full_width_fields": [],
+            },
+            {
+                "formset": norm_formset,
+                "eyebrow": "Норми виробництва",
+                "title": "Нормативи виробництва",
+                "help": "Автопланувальник використовує активні норми по відповідному етапу.",
+                "item_label": "Норматив",
+                "item_full_width_fields": ["comment"],
+            },
+        ],
         page_title=product.name,
         hero_title="Редагувати продукт",
-        hero_text="Оновлення каталожних, технічних і цінових даних продукту у робочому інтерфейсі CRM, зокрема норм часу та матеріалів.",
+        hero_text="Оновлення каталожних, складських і виробничих параметрів продукту в одному робочому екрані.",
         submit_label="Зберегти продукт",
         cancel_url=_safe_next_url(request) or fallback_url,
         mode_label="Редагування",
@@ -1578,11 +2179,6 @@ def product_update(request, product_id):
         if request.user.has_perm("crm.delete_product")
         else None,
         full_width_fields=DEFAULT_FULL_WIDTH_FIELDS,
-        item_full_width_fields=["comment"],
-        formset_eyebrow="Норми виробництва",
-        formset_title="Нормативи виробництва",
-        formset_help="Автопланувальник використовує активні норми по відповідному етапу.",
-        formset_item_label="Норматив",
     )
 
 
@@ -1590,7 +2186,7 @@ def product_update(request, product_id):
 def product_delete(request, product_id):
     _require_permission(request, "crm.delete_product")
     product = get_object_or_404(Product, pk=product_id)
-    fallback_url = reverse("crm_products")
+    fallback_url = reverse("crm_materials") if product.is_material else reverse("crm_products")
     delete_error = None
     if request.method == "POST":
         try:
@@ -1601,7 +2197,7 @@ def product_delete(request, product_id):
             return _redirect_target(request, fallback_url)
     return _render_delete_page(
         request,
-        crm_nav="products",
+        crm_nav="materials" if product.is_material else "products",
         object_label="Продукт",
         object_title=product.name,
         hero_text="Видалення продукту можливе лише тоді, коли він не використовується в існуючих замовленнях.",

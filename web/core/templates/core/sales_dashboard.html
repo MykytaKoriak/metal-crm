@@ -90,6 +90,9 @@
                             <p class="muted">Дедлайн: {{ order.deadline|date:"d.m.Y" }}</p>
                             <p>{{ order.contact.full_name }}{% if order.contact.client %} / {{ order.contact.client.name }}{% endif %}</p>
                             <p class="muted">{{ order.get_status_display }}</p>
+                            <div class="link-row">
+                                <a href="{% url 'crm_order_update' order.id %}?next={% url 'sales_dashboard' %}">Відкрити замовлення</a>
+                            </div>
                         </article>
                     {% endfor %}
                 </div>

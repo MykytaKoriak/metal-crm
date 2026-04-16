@@ -7,12 +7,18 @@ from .models import (
     Client,
     ClientInteraction,
     Contact,
+    InventoryBalance,
+    InventoryReceipt,
+    InventoryReceiptItem,
+    InventoryTransaction,
     Order,
     OrderItem,
     Product,
+    ProductBOM,
     ProductProductionNorm,
     Tag,
     Task,
+    Warehouse,
 )
 from manufacture.models import ProductionSlot
 
@@ -136,22 +142,33 @@ class ProductProductionNormInline(admin.TabularInline):
     )
 
 
+class ProductBOMInline(admin.TabularInline):
+    model = ProductBOM
+    fk_name = "product"
+    extra = 0
+    autocomplete_fields = ("material",)
+    fields = ("material", "quantity")
+
+
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ["name", "sku", "base_price", "is_active"]
-    list_filter = ["is_active"]
+    list_display = ["name", "sku", "base_price", "unit", "track_inventory", "is_material", "is_active"]
+    list_filter = ["is_active", "track_inventory", "is_material"]
     search_fields = ["name", "sku", "description", "technical_description"]
-    inlines = [ProductProductionNormInline]
+    inlines = [ProductBOMInline, ProductProductionNormInline]
 
     fieldsets = (
         ("Основна інформація", {
-            "fields": ("name", "sku", "is_active")
+            "fields": ("name", "sku", "unit", "is_active")
         }),
         ("Опис", {
             "fields": ("description", "technical_description")
         }),
         ("Ціна", {
             "fields": ("base_price",)
+        }),
+        ("Склад", {
+            "fields": ("track_inventory", "is_material", "min_stock_level")
         }),
         ("Маркетплейси", {
             "fields": ("prom_url", "rozetka_url", "olx_url", "site_url")
@@ -388,3 +405,98 @@ class ProductProductionNormAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related("product")
+
+
+@admin.register(Warehouse)
+class WarehouseAdmin(admin.ModelAdmin):
+    list_display = ("name", "type", "is_active")
+    list_filter = ("type", "is_active")
+    search_fields = ("name",)
+
+
+@admin.register(InventoryBalance)
+class InventoryBalanceAdmin(admin.ModelAdmin):
+    list_display = ("product", "warehouse", "quantity", "reserved_quantity", "available_display", "updated_at")
+    list_filter = ("warehouse__type", "warehouse")
+    search_fields = ("product__name", "product__sku", "warehouse__name")
+    readonly_fields = ("product", "warehouse", "quantity", "reserved_quantity", "updated_at")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Доступно")
+    def available_display(self, obj):
+        return obj.available
+
+
+class InventoryReceiptItemInline(admin.TabularInline):
+    model = InventoryReceiptItem
+    extra = 0
+    autocomplete_fields = ("product",)
+    fields = ("product", "quantity", "comment")
+
+
+@admin.register(InventoryReceipt)
+class InventoryReceiptAdmin(admin.ModelAdmin):
+    list_display = ("document_date", "invoice_number", "supplier_name", "warehouse", "created_by", "posted_at")
+    list_filter = ("document_date", "warehouse")
+    search_fields = ("invoice_number", "supplier_name", "warehouse__name")
+    readonly_fields = ("created_at", "created_by", "posted_at", "posted_by")
+    autocomplete_fields = ("warehouse", "created_by", "posted_by")
+    inlines = [InventoryReceiptItemInline]
+
+    fieldsets = (
+        ("Накладна", {"fields": ("warehouse", "supplier_name", "invoice_number", "document_date", "comment")}),
+        ("Проведення", {"fields": ("created_at", "created_by", "posted_at", "posted_by")}),
+    )
+
+
+@admin.register(InventoryTransaction)
+class InventoryTransactionAdmin(admin.ModelAdmin):
+    list_display = (
+        "created_at",
+        "type",
+        "product",
+        "quantity",
+        "warehouse_from",
+        "warehouse_to",
+        "receipt",
+        "order",
+        "created_by",
+    )
+    list_filter = ("type", "warehouse_from", "warehouse_to", "receipt", "created_at")
+    search_fields = (
+        "product__name",
+        "product__sku",
+        "receipt__invoice_number",
+        "receipt__supplier_name",
+        "order__title",
+        "created_by__email",
+        "created_by__username",
+    )
+    autocomplete_fields = ("product", "warehouse_from", "warehouse_to", "receipt", "order", "production_stage", "created_by")
+    readonly_fields = (
+        "type",
+        "product",
+        "quantity",
+        "warehouse_from",
+        "warehouse_to",
+        "receipt",
+        "order",
+        "order_item",
+        "production_stage",
+        "created_at",
+        "created_by",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
